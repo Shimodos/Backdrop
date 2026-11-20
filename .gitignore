@@ -1,0 +1,6 @@
+dist/
+tests/out/
+docs/mockups/
+tools/dropbox_comments_answer.json
+__pycache__/
+*.pyc

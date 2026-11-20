@@ -1,0 +1,5 @@
+name "Backdrop a0.002"
+version 2
+run "install.ms"
+drop "install.ms"
+clear temp on MAX exit
