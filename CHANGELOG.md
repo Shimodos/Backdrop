@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- The preview grid lost a column as soon as its scroll bar appeared.
+- The month in the time of a comment followed the Windows locale; it is in English now,
+  like the rest of the panel.
+
 ## a0.002
 
 First public version.

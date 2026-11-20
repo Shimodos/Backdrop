@@ -11,7 +11,13 @@ they were asked for.
   <img src="docs/shots/panel-light.png" width="300" alt="Backdrop, light theme">
 </p>
 
-The thumbnails in these screenshots are test colours; with your renders they are previews.
+On the viewport every comment is a frame with a numbered pin; the one picked in the panel
+is highlighted with its text:
+
+<img src="docs/shots/viewport.png" width="610" alt="Comment frames over the image">
+
+The photos in these screenshots stand in for renders
+([credits](tools/shots/images/CREDITS.md)).
 
 ## Features
 
@@ -82,6 +88,7 @@ installer/                install.ms, mzp.run and toolbar icons
 tests/                    checks that run inside 3ds Max
 tools/build_mzp.ps1       builds dist/Backdrop_<version>.mzp
 tools/make_icons.ps1      draws the toolbar icons and docs/icon-256.png
+tools/make_shots.ps1      renders docs/shots (the screenshots above)
 ```
 
 Tests drive the real panel inside 3ds Max through `3dsmaxbatch.exe` (no window is shown)
@@ -93,6 +100,12 @@ pwsh tests/run_tests.ps1 -Years 2026
 ```
 
 One check calls the real DeepL server with a made-up key; it is skipped without a network.
+
+Screenshots are rendered the same way, from the panel itself rather than from the screen:
+
+```powershell
+pwsh tools/make_shots.ps1
+```
 
 A release is built by GitHub Actions when a `v*` tag is pushed.
 

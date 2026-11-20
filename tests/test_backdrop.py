@@ -315,10 +315,11 @@ def run():
     check("comments listed", panel.notes_list.count() == 3, panel.notes_list.count())
     check("what is left is counted", panel.notes_count.full == "3 of 3 left",
           panel.notes_count.full)
-    check("comment time in local time", mod.local_time("2026-11-20T13:43:39.000Z")
-          == datetime.datetime(2026, 11, 20, 13, 43, 39, tzinfo=datetime.timezone.utc)
-          .astimezone().strftime("%d %b %H:%M") and panel._notes[0]["time"] != "",
-          panel._notes[0]["time"])
+    local = datetime.datetime(2026, 11, 20, 13, 43, 39, tzinfo=datetime.timezone.utc).astimezone()
+    check("comment time in local time, month in English",
+          mod.local_time("2026-11-20T13:43:39.000Z")
+          == "{:02d} Nov {:02d}:{:02d}".format(local.day, local.hour, local.minute)
+          and panel._notes[0]["time"] != "", panel._notes[0]["time"])
     check("badge on the thumbnail", thumb_count(panel, NAMES[3]) == 3
           and thumb_count(panel, NAMES[0]) == 0, thumb_count(panel, NAMES[3]))
     hint = panel.notes_list.itemDelegate().sizeHint(None, panel.notes_list.model().index(0, 0))
@@ -336,8 +337,10 @@ def run():
     check("second click on the pin ticks it on again", not cards.is_done(first)
           and panel.notes_count.full == "3 of 3 left")
     grid = panel.list.gridSize()
-    check("three thumbnails in a row", grid.width() * 3 <= panel.list.viewport().width()
-          < grid.width() * 4, (grid.width(), panel.list.viewport().width()))
+    bar = panel.list.verticalScrollBar().sizeHint().width()
+    check("three thumbnails in a row, with or without the scroll bar",
+          grid.width() * 3 <= panel.list.width() - bar < grid.width() * 4,
+          (grid.width(), panel.list.width(), bar))
     check("frame caption", mod.caption_of(panel.overlay.notes[1]) == "2  Подсветитиь")
     check("overlay draws, not gw", int(rt.bd_notes.count) == 0 and "bd_draw" not in callbacks())
 

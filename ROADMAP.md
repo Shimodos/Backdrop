@@ -33,4 +33,3 @@ an image, starting with Google Drive.
 ## Panel
 
 - Website with screenshots and a demo, like the one of Layer Manager.
-- Screenshots in this repository rendered from a demo scene instead of test colours.

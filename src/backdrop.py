@@ -368,12 +368,17 @@ def index_comment_files(folders):
     return dict((image, found[1]) for image, found in best.items())
 
 
+MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
 def local_time(stamp):
     """'2026-11-20T13:43:39.000Z' -> '20 Nov 15:43' in this computer's time."""
     try:
         moment = datetime.datetime.strptime(stamp[:19], "%Y-%m-%dT%H:%M:%S")
         moment = moment.replace(tzinfo=datetime.timezone.utc).astimezone()
-        return moment.strftime("%d %b %H:%M")
+        # Not strftime("%b"): that follows the Windows locale, the panel is in English.
+        return "{:02d} {} {:02d}:{:02d}".format(
+            moment.day, MONTHS[moment.month - 1], moment.hour, moment.minute)
     except ValueError:
         return ""
 
@@ -956,15 +961,18 @@ class ThumbList(QtWidgets.QListWidget):
         self._fit_grid()
 
     def resizeEvent(self, event):
-        # The event carries the new size of the viewport; viewport().width()
-        # is still the old one here.
-        self._fit_grid(event.size().width())
+        self._fit_grid()
         super(ThumbList, self).resizeEvent(event)
 
-    def _fit_grid(self, width=None):
-        width = max(120, width if width is not None else self.viewport().width())
-        columns = max(2, int(round(width / 108.0)))
-        cell = (width - 4) // columns       # a little slack, or the last one wraps
+    def _fit_grid(self):
+        # From the width of the list itself, with room for the scroll bar
+        # whether it is shown or not: sized from the viewport, the cells
+        # stopped fitting the moment the scroll bar appeared and a column
+        # dropped off.
+        bar = self.verticalScrollBar().sizeHint().width()
+        width = max(120, self.width() - bar - 2 * self.frameWidth() - 4)
+        columns = max(2, int(round(width / 104.0)))
+        cell = width // columns
         self.setGridSize(QtCore.QSize(cell, int((cell - self.GAP) * 0.75) + self.CAPTION + self.GAP))
 
 
