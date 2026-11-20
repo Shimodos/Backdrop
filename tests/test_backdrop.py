@@ -394,6 +394,27 @@ def run():
     pump(50)
     check("ticked on again", overlay.done == set() and thumb_count(panel, NAMES[3]) == 3)
 
+    # --- the eye on a card: one frame off the viewport, apart from ticking off ---
+    cards.toggle_eye(panel.notes_list.model().index(0, 0))
+    pump(50)
+    check("eye off: that frame leaves the viewport",
+          [n["label"] for n in overlay.notes] == ["2", "3"], [n["label"] for n in overlay.notes])
+    check("eye off: the comment is still to do", panel.notes_count.full == "3 of 3 left"
+          and panel.notes_list.item(0).checkState() == QtCore.Qt.Checked
+          and thumb_count(panel, NAMES[3]) == 3, panel.notes_count.full)
+    activate(NAMES[0])
+    activate(NAMES[3])
+    check("eye off is remembered", [n["label"] for n in overlay.notes] == ["2", "3"]
+          and panel.notes_list.unseen == {"1"}, panel.notes_list.unseen)
+    panel._use_gw = True
+    panel._draw_notes()
+    check("eye off holds for the gw fallback too", int(rt.bd_notes.count) == 2)
+    panel._use_gw = False
+    panel._draw_notes()
+    cards.toggle_eye(panel.notes_list.model().index(0, 0))
+    pump(50)
+    check("eye on again: frame back", drawn(panel) == 3 and panel.notes_list.unseen == set())
+
     # --- picking a card, letting go of it, opacity ---
     panel.select_note("3")
     pump(50)

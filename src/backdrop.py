@@ -202,6 +202,10 @@ ICONS = {
               'a2 2 0 0 1-2-2V7z"/>',
     "eye": '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/>'
            '<circle cx="12" cy="12" r="3"/>',
+    "eye_off": '<path d="M3 3l18 18"/>'
+               '<path d="M10.600 5.100c.500-.100.900-.100 1.400-.100 6.400 0 10 7 10 7s-1.100 2.200-3.200 4.100"/>'
+               '<path d="M6.600 6.600C3.600 8.500 2 12 2 12s3.600 7 10 7c1.700 0 3.200-.500 4.500-1.200"/>'
+               '<path d="M9.900 9.900a3 3 0 0 0 4.200 4.200"/>',
     "link": '<path d="M10 14a4 4 0 0 0 5.700 0l3-3a4 4 0 0 0-5.700-5.700l-1 1"/>'
             '<path d="M14 10a4 4 0 0 0-5.700 0l-3 3a4 4 0 0 0 5.700 5.700l1-1"/>',
     "check": '<path d="M5 12.500l4.500 4.500L19 7.500"/>',
@@ -1059,12 +1063,15 @@ class ThumbDelegate(QtWidgets.QStyledItemDelegate):
 
 
 class NoteList(QtWidgets.QListWidget):
-    """Comment cards. The panel fills .notes in the order of the rows."""
+    """Comment cards. The panel fills .notes in the order of the rows and
+    .unseen with the labels whose frames are switched off."""
+    eyeClicked = QtCore.Signal(str)         # label of the card whose eye was clicked
 
     def __init__(self, parent=None):
         super(NoteList, self).__init__(parent)
         self.setObjectName("notes")
         self.notes = []
+        self.unseen = set()
         self.pin_clicked = False
         self.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -1079,8 +1086,10 @@ class NoteList(QtWidgets.QListWidget):
 
 class NoteDelegate(QtWidgets.QStyledItemDelegate):
     """One comment as a card: numbered pin (a tick once dealt with), the text,
-    the original under a translation, author and time."""
+    the original under a translation, author and time, and an eye that takes
+    its frame off the viewport."""
     PIN = 40                                # width of the pin column, also its click area
+    EYE = 34                                # the same for the eye, on the right
 
     def __init__(self, view):
         super(NoteDelegate, self).__init__(view)
@@ -1091,7 +1100,7 @@ class NoteDelegate(QtWidgets.QStyledItemDelegate):
         return self.view.notes[row] if 0 <= row < len(self.view.notes) else None
 
     def _text_width(self):
-        return max(60, self.view.viewport().width() - self.PIN - 14)
+        return max(60, self.view.viewport().width() - self.PIN - self.EYE - 4)
 
     def _text_height(self, note):
         metrics = QtGui.QFontMetrics(ui_font(12, True))
@@ -1109,14 +1118,24 @@ class NoteDelegate(QtWidgets.QStyledItemDelegate):
         return QtCore.QSize(100, max(46, height) + 6)
 
     def editorEvent(self, event, model, option, index):
-        """A click on the pin ticks the comment off or on again."""
-        if event.type() == QtCore.QEvent.MouseButtonRelease \
-                and event.button() == Qt.LeftButton \
-                and event.pos().x() - option.rect.left() <= self.PIN:
+        """A click on the pin ticks the comment off or on again; a click on
+        the eye hides or shows its frame on the viewport."""
+        if event.type() != QtCore.QEvent.MouseButtonRelease or event.button() != Qt.LeftButton:
+            return False
+        if event.pos().x() - option.rect.left() <= self.PIN:
             self.view.pin_clicked = True            # the click is not a pick, see _note_clicked
             self.toggle(index)
             return True
+        if option.rect.right() - event.pos().x() <= self.EYE:
+            self.view.pin_clicked = True
+            self.toggle_eye(index)
+            return True
         return False
+
+    def toggle_eye(self, index):
+        note = self._note(index)
+        if note is not None:
+            self.view.eyeClicked.emit(note["label"])
 
     def is_done(self, index):
         """Ticked off. Asked from the item: the raw role value is an int in
@@ -1160,6 +1179,11 @@ class NoteDelegate(QtWidgets.QStyledItemDelegate):
                 painter.setPen(QtGui.QColor(T["accent_text"]))
                 painter.drawText(QtCore.QRectF(center.x() - 10, center.y() - 10, 20, 20),
                                  int(Qt.AlignCenter), note["label"])
+
+            unseen = note["label"] in self.view.unseen
+            svg_renderer("eye_off" if unseen else "eye",
+                         T["icon_off"] if unseen else T["text_dim"], 1.8).render(
+                painter, QtCore.QRectF(card.right() - 26, card.top() + 13, 16, 16))
 
             x = card.left() + self.PIN
             width = self._text_width()
@@ -1274,6 +1298,7 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
         self._notes = []                    # comments of the shown image
         self._notes_file = None             # (path, mtime) they were read from
         self._hidden = set()                # labels ticked off as dealt with
+        self._unseen = set()                # labels whose frame is off the viewport
         self._selected = None               # label of the comment picked in the list
         self._just_selected = False         # see _note_clicked
         self._parsed = {}                   # comments file -> (mtime, notes)
@@ -1396,6 +1421,7 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
 
         self.notes_list = NoteList(self)
         self.notes_list.itemChanged.connect(self._note_checked)
+        self.notes_list.eyeClicked.connect(self.toggle_note_visible)
         self.notes_list.itemSelectionChanged.connect(self._note_selection_changed)
         self.notes_list.itemClicked.connect(self._note_clicked)
         main_layout.addWidget(self.notes_list, 4)
@@ -1771,6 +1797,8 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
         self._notes_file = found
         self._notes = self._read_notes(found[0]) if found else []
         self._hidden = load_hidden(found[0]) if found else set()
+        self._unseen = load_hidden(found[0], "unseen") if found else set()
+        self.notes_list.unseen = self._unseen
         self._apply_language()
         self._fill_notes()
         self._draw_notes()
@@ -1924,7 +1952,20 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
         """Comments whose frames are drawn right now."""
         if not (self.notes_btn.isChecked() and self.show_btn.isChecked()):
             return []
-        return [n for n in self._notes if n["region"]]
+        return [n for n in self._notes if n["region"] and n["label"] not in self._unseen]
+
+    def toggle_note_visible(self, label):
+        """The eye on a card: take this comment's frame off the viewport, or
+        put it back. Apart from ticking it off, and kept per comments file."""
+        if label in self._unseen:
+            self._unseen.discard(label)
+        else:
+            self._unseen.add(label)
+        if self._notes_file:
+            save_hidden(self._notes_file[0], self._unseen, "unseen")
+        self.notes_list.unseen = self._unseen
+        self.notes_list.viewport().update()
+        self._draw_notes()
 
     def _draw_notes(self):
         notes = self.visible_notes()
@@ -2177,21 +2218,23 @@ def load_color(key, default):
     return color if color.isValid() else QtGui.QColor(default)
 
 
-def _hidden_id(path):
-    return "hidden/" + hashlib.md5(path.lower().encode("utf-8")).hexdigest()
+def _hidden_id(path, kind="hidden"):
+    return kind + "/" + hashlib.md5(path.lower().encode("utf-8")).hexdigest()
 
 
-def load_hidden(path):
-    """Labels unticked in the checklist of this comments file."""
+def load_hidden(path, kind="hidden"):
+    """Labels marked in this comments file: kind "hidden" = ticked off in the
+    checklist, "unseen" = frame switched off on the viewport."""
     try:
-        return set(x for x in str(_settings().value(_hidden_id(path)) or "").split("|") if x)
+        return set(x for x in str(_settings().value(_hidden_id(path, kind)) or "").split("|")
+                   if x)
     except Exception:
         return set()
 
 
-def save_hidden(path, labels):
+def save_hidden(path, labels, kind="hidden"):
     try:
-        _settings().setValue(_hidden_id(path), "|".join(sorted(labels)))
+        _settings().setValue(_hidden_id(path, kind), "|".join(sorted(labels)))
     except Exception as e:
         print("Backdrop: could not save the checklist ({})".format(e))
 
