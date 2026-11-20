@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## a0.003
 
 ### Fixed
 - The preview grid lost a column as soon as its scroll bar appeared.

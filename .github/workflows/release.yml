@@ -1,7 +1,7 @@
 name: Release
 
 # Builds the .mzp (a zip archive with mzp.run at its root) and publishes it as a
-# GitHub release when a v* tag is pushed, e.g.  git tag v0.02 && git push origin v0.02
+# GitHub release when a v* tag is pushed, e.g.  git tag v0.03 && git push origin v0.03
 on:
   push:
     tags: ['v*']
