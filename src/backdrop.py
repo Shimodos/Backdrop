@@ -1319,6 +1319,7 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
         self.initUI()
         self.setTitleBarWidget(CustomDockWidgetTitleBar(self))
         self.apply_theme()
+        watch_saves(True)
         self._poll()
         self._poll_timer.start()
 
@@ -1562,9 +1563,9 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
 
     # -- Folder -------------------------------------------------------------
     def browse_folder(self):
-        start = self._folder if os.path.isdir(self._folder) else ""
+        start = self._folder if os.path.isdir(self._folder) else last_folder()
         folder = QtWidgets.QFileDialog.getExistingDirectory(
-            self, "Folder with the delivered images", start)
+            self, "Folder with the delivered images", start if os.path.isdir(start) else "")
         if folder:
             self.set_folder(folder)
 
@@ -1607,7 +1608,17 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
         menu.addSeparator()
         menu.addAction("Re-read the folders").triggered.connect(
             lambda _checked=False: self.rescan())
+        clear = menu.addAction("Clear the folders of this scene")
+        clear.setEnabled(bool(self._folder or self._notes_folder))
+        clear.triggered.connect(lambda _checked=False: self.clear_folders())
         return menu
+
+    def clear_folders(self):
+        """Forget the image and the comments folder of the open scene; the
+        image and the frames leave the viewport with them."""
+        self._notes_folder = ""
+        save_folder(scene_path(), "", "comments")
+        self.set_folder("")
 
     def open_folder_menu(self):
         menu = self.folder_menu()
@@ -1621,10 +1632,19 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
     # -- Following the scene --------------------------------------------------
     def _poll(self):
         scene = scene_path()
-        if scene != self._scene:            # another file: its own folder
+        saved = scene_was_saved()
+        if scene != self._scene:
+            renamed = saved and self._scene is not None and scene \
+                and stored_folder(scene) is None
             self._scene = scene
-            self._notes_folder = load_folder(scene, "comments")
-            self.set_folder(load_folder(scene), remember=False)
+            if renamed:
+                # Save As: the same scene under a new name keeps its folders.
+                save_folder(scene, self._folder)
+                save_folder(scene, self._notes_folder, "comments")
+            else:
+                # Another scene: its own folders, or none for one never set up.
+                self._notes_folder = load_folder(scene, "comments")
+                self.set_folder(load_folder(scene), remember=False)
             return
         if self._theme_mode == "auto":
             dark = max_is_dark()
@@ -2045,6 +2065,7 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
         self._poll_timer.stop()
         self._thumb_queue = []
         try:
+            watch_saves(False)
             draw_comments([])               # leave no callback behind
         except Exception:
             pass
@@ -2075,29 +2096,63 @@ def _scene_id(scene, kind):
     return kind + "/" + hashlib.md5(scene.encode("utf-8")).hexdigest()
 
 
-def load_folder(scene, kind="folders"):
-    """Folder used with this scene file ("folders": images, "comments":
-    comment files). A scene seen for the first time starts with the last
-    image folder chosen and no comments folder."""
+def stored_folder(scene, kind="folders"):
+    """Folder kept for this scene file ("folders": images, "comments":
+    comment files), or None when nothing was ever chosen for it."""
     try:
-        settings = _settings()
-        folder = settings.value(_scene_id(scene, kind)) if scene else None
-        if folder is None and kind == "folders":
-            folder = settings.value("last_folder")
-        return str(folder or "")
+        value = _settings().value(_scene_id(scene, kind)) if scene else None
+        return None if value is None else str(value)
     except Exception:
-        return ""
+        return None
+
+
+def load_folder(scene, kind="folders"):
+    """Folder of this scene file. Folders belong to the scene they were
+    chosen in: a scene without its own (a new one too) starts empty."""
+    return stored_folder(scene, kind) or ""
 
 
 def save_folder(scene, folder, kind="folders"):
     try:
         settings = _settings()
-        if kind == "folders":
-            settings.setValue("last_folder", folder)
+        if kind == "folders" and folder:
+            settings.setValue("last_folder", folder)    # where "Choose..." opens
         if scene:
             settings.setValue(_scene_id(scene, kind), folder)
     except Exception as e:
         print("Backdrop: could not save the folder ({})".format(e))
+
+
+def last_folder():
+    try:
+        return str(_settings().value("last_folder") or "")
+    except Exception:
+        return ""
+
+
+# Set by a #filePostSave callback while the panel is open: tells "the scene got
+# a new name by Save As" (its folders go with it) from "another scene was
+# opened" (it has folders of its own, or none). A MAXScript global, so the
+# callback needs nothing from Python.
+SAVE_CALLBACK = "adtools_backdrop_saved"
+
+
+def watch_saves(on):
+    rt.execute("global bd_saved = false")
+    rt.execute("callbacks.removeScripts id:#{}".format(SAVE_CALLBACK))
+    if on:
+        rt.execute("callbacks.addScript #filePostSave \"bd_saved = true\" id:#{}".format(
+            SAVE_CALLBACK))
+
+
+def scene_was_saved():
+    """True once after a save of the scene; resets the flag."""
+    try:
+        saved = bool(rt.execute("bd_saved == true"))
+        rt.execute("bd_saved = false")
+        return saved
+    except Exception:
+        return False
 
 
 def load_key():

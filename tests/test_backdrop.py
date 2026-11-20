@@ -601,8 +601,9 @@ def run():
           rt.bd_notes.count)
 
     # --- folder is remembered ---
-    check("folder saved", mod.load_folder(mod.scene_path()) == os.path.normpath(IMAGES),
-          mod.load_folder(mod.scene_path()))
+    check("untitled scene: the folder is not stored anywhere", mod.scene_path() == ""
+          and mod.load_folder("") == "" and mod.last_folder() == os.path.normpath(IMAGES),
+          mod.last_folder())
 
     # --- themes + screenshot ---
     for mode in ("light", "dark"):
@@ -639,9 +640,71 @@ def run():
     else:
         log("skip   Layer Manager not found at", layer_manager_src)
 
+    # --- folders belong to the scene they were chosen in ---
+    scenes = os.path.join(IMAGES, "002")
+    first = os.path.join(scenes, "scene_a.max")
+    second = os.path.join(scenes, "scene_b.max")
+    images = os.path.normpath(IMAGES)
+    panel.set_notes_folder(scenes)
+    check("save callback registered", "bd_saved" in str(rt.execute(
+        "(local s = stringStream \"\"; callbacks.show id:#adtools_backdrop_saved to:s; s as string)")))
+    rt.saveMaxFile(first, quiet=True)       # the untitled scene gets a name
+    pump(900)
+    check("save as: the scene keeps its folders", panel._folder == images
+          and panel.list.count() > 0, panel._folder)
+    check("save as: they are stored for the new name",
+          mod.stored_folder(mod.scene_path()) == images
+          and mod.stored_folder(mod.scene_path(), "comments") == os.path.normpath(scenes),
+          mod.stored_folder(mod.scene_path()))
+    rt.resetMaxFile(rt.name("noPrompt"))    # File > New
+    pump(900)
+    check("new scene starts with no folders", panel._folder == "" and panel._notes_folder == ""
+          and panel.list.count() == 0, (panel._folder, panel.list.count()))
+    check("new scene: says to choose a folder", "Choose the folder" in panel.status_label.text(),
+          panel.status_label.text())
+    rt.saveMaxFile(second, quiet=True)      # an empty scene saved: nothing to carry
+    pump(900)
+    check("scene saved without folders stays without", panel._folder == ""
+          and mod.load_folder(mod.scene_path()) == "", panel._folder)
+    rt.loadMaxFile(first, quiet=True)
+    pump(900)
+    check("opening a scene brings its own folders back", panel._folder == images
+          and panel._notes_folder == os.path.normpath(scenes)
+          and panel.list.count() > 0, (panel._folder, panel._notes_folder))
+    rt.loadMaxFile(second, quiet=True)
+    pump(900)
+    check("opening the other scene: still none", panel._folder == "" and panel.list.count() == 0,
+          panel._folder)
+    clear = [a for a in panel.folder_menu().actions() if a.text().startswith("Clear the folders")]
+    check("nothing to clear in a scene without folders", len(clear) == 1 and not clear[0].isEnabled())
+
+    # --- clearing the folders of a scene ---
+    rt.loadMaxFile(first, quiet=True)
+    pump(900)
+    clear = [a for a in panel.folder_menu().actions() if a.text().startswith("Clear the folders")]
+    check("clear is offered when the scene has folders", clear[0].isEnabled())
+    clear[0].trigger()
+    pump(200)
+    check("clear: both folders gone, list and viewport empty",
+          panel._folder == "" and panel._notes_folder == "" and panel.list.count() == 0
+          and panel.notes_list.count() == 0 and not shown() and drawn(panel) == 0,
+          (panel._folder, panel._notes_folder))
+    check("clear is remembered for the scene", mod.stored_folder(mod.scene_path()) == ""
+          and mod.stored_folder(mod.scene_path(), "comments") == "")
+    rt.loadMaxFile(second, quiet=True)
+    pump(900)
+    rt.loadMaxFile(first, quiet=True)
+    pump(900)
+    check("cleared scene stays empty when opened again", panel._folder == ""
+          and panel._notes_folder == "", (panel._folder, panel._notes_folder))
+    rt.resetMaxFile(rt.name("noPrompt"))
+    pump(300)
+
     panel.close()
     pump(50)
     check("closing removes the redraw callback", "bd_draw" not in callbacks())
+    check("closing removes the save callback", "bd_saved" not in str(rt.execute(
+        "(local s = stringStream \"\"; callbacks.show id:#adtools_backdrop_saved to:s; s as string)")))
     rt.execute("viewport.DispBkgImage = false")
 
 
