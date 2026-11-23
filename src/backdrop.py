@@ -313,6 +313,312 @@ def match_image(key, images):
     return best[1] if best else None
 
 
+# What the image of the scene may be named by, most trusted first.
+KEY_SOURCES = {"setup": "Scene Manager setup", "output": "render output",
+               "batch": "Batch Render view", "camera": "camera name"}
+
+
+def view_camera():
+    """Camera of the viewport the image goes on (camera_viewport), or None."""
+    index = camera_viewport()
+    if index is None:
+        return None
+    try:
+        return rt.viewport.getCamera(index=index)
+    except Exception:
+        return None
+
+
+def batch_names(camera):
+    """File names (no folder, no extension) the Batch Render views of the
+    camera save to, in the order of the list. batchRenderMgr: numViews,
+    GetView, and camera / outputFilename of a view -- checked in 3ds Max 2024
+    and 2026; a view rendering "the viewport" has no camera."""
+    names = []
+    try:
+        manager = rt.batchRenderMgr
+        wanted = rt.getHandleByAnim(camera)
+        for index in range(1, int(manager.numViews) + 1):
+            view = manager.GetView(index)
+            if view.camera is None or rt.getHandleByAnim(view.camera) != wanted:
+                continue
+            path = str(view.outputFilename or "").replace("/", "\\")
+            name = os.path.splitext(os.path.basename(path))[0]
+            if name and name not in names:
+                names.append(name)
+    except Exception:
+        pass
+    return names
+
+
+def image_keys(camera=None):
+    """[(source, name)] the image of the scene may be named by, in the order
+    they are tried:
+
+      "output"  the file name of the render output -- what Pulze Scene Manager
+                writes when a setup is activated;
+      "batch"   the output file of a Batch Render view of the camera;
+      "camera"  the name of the camera itself.
+
+    The last two are for scenes without Scene Manager, and belong to the
+    camera the viewport looks through."""
+    keys = []
+    name = setup_key()
+    if name:
+        keys.append(("output", name))
+    if camera is not None:
+        keys += [("batch", name) for name in batch_names(camera)]
+        try:
+            keys.append(("camera", str(camera.name)))
+        except Exception:
+            pass
+    return keys
+
+
+def find_image(keys, images):
+    """(path, source, name) for the first of image_keys() an image is named
+    like, or (None, "", "")."""
+    for source, name in keys:
+        path = match_image(name, images)
+        if path:
+            return path, source, name
+    return None, "", ""
+
+
+def camera_for_image(stem):
+    """Camera an image is named after, or None: the other way round from
+    image_keys(). A camera with a Batch Render view saving to that name, or a
+    camera of that name; an exact name before one that only starts alike."""
+    wanted = _norm(stem)
+    if not wanted:
+        return None
+    named = []                              # (name, camera), Batch Render views first
+    try:
+        manager = rt.batchRenderMgr
+        for index in range(1, int(manager.numViews) + 1):
+            view = manager.GetView(index)
+            path = str(view.outputFilename or "").replace("/", "\\")
+            if view.camera is not None and path:
+                named.append((os.path.splitext(os.path.basename(path))[0], view.camera))
+    except Exception:
+        pass
+    try:
+        named += [(str(node.name), node) for node in rt.cameras
+                  if rt.superClassOf(node) == rt.camera]
+    except Exception:
+        pass
+    best = None
+    for name, camera in named:
+        name = _norm(name)
+        if name == wanted:
+            return camera
+        if name and (wanted.startswith(name) or name.startswith(wanted)):
+            if best is None or len(name) > best[0]:
+                best = (len(name), camera)
+    return best[1] if best else None
+
+
+def look_through(camera):
+    """Put the camera in the viewport the image goes on (the camera view, else
+    the active viewport). True when the view changed. viewport.setCamera works
+    on the active viewport, so another one is made active for a moment."""
+    index = camera_viewport()
+    active = int(rt.viewport.activeViewport)
+    if index is None:
+        index = active
+    try:
+        current = rt.viewport.getCamera(index=index)
+        if current is not None and rt.getHandleByAnim(current) == rt.getHandleByAnim(camera):
+            return False
+    except Exception:
+        pass
+    if index != active:
+        rt.execute("viewport.activeViewport = {}".format(index))
+    try:
+        rt.viewport.setCamera(camera)
+    finally:
+        if index != active:
+            rt.execute("viewport.activeViewport = {}".format(active))
+    return True
+
+
+# Pulze Scene Manager 2 keeps its setups in the scene file, in a custom stream
+# of this name: base64 of a JSON list, one entry per setup (read from a scene
+# with setups, Scene Manager 2.6.3, data version 7). Of an entry this uses
+#   scenename.text                    the name of the setup, which names the image;
+#   camera.enabled / name / handle    the camera;
+#   frames.enabled / type / single    the frame, when type is 0 (one frame);
+#   layers.enabled / set              the layers the setup shows and hides: each
+#                                     has a name and props, of which the one
+#                                     named "on" (true / false) is the eye;
+#   output_Common.enabled / finalPath the render output file, folder and all;
+#   resolution.enabled / width / height   the output size.
+PULZE_STREAM = "SMX_SceneData"
+
+
+def pulze_setups(path=None):
+    """[{"name", "camera", "handle", "frame", "layers", "output", "size"}] of
+    the Scene Manager setups in the scene file as it was last saved ([]
+    without any): camera is its name ('' when the setup sets none), frame an
+    int or None, layers [(layer name, shown)] ([] when the setup leaves the
+    layers alone), output the render output file ('' when not set by the
+    setup), size (width, height) or None. The file is read on disk with
+    CustomFileStream, so a setup changed since the save is the old one here."""
+    import base64
+    if path is None:
+        try:
+            path = os.path.join(str(rt.maxFilePath), str(rt.maxFileName))
+        except Exception:
+            return []
+    if not os.path.isfile(path):
+        return []
+    try:
+        if not rt.CustomFileStream.doesStreamExist(path, PULZE_STREAM):
+            return []
+        text = str(rt.CustomFileStream.readStream(path, PULZE_STREAM))
+        entries = json.loads(base64.b64decode(text).decode("utf-8"))
+    except Exception:
+        return []
+    setups = []
+    for entry in entries if isinstance(entries, list) else []:
+        try:
+            name = str((entry.get("scenename") or {}).get("text") or "")
+            camera = entry.get("camera") or {}
+            frames = entry.get("frames") or {}
+            setup = {"name": name, "camera": "", "handle": None, "frame": None, "layers": [],
+                     "output": "", "size": None}
+            output = entry.get("output_Common") or {}
+            if output.get("enabled") is True and isinstance(output.get("finalPath"), str):
+                setup["output"] = output["finalPath"]
+            size = entry.get("resolution") or {}
+            if size.get("enabled") is True:
+                try:
+                    width, height = int(str(size.get("width"))), int(str(size.get("height")))
+                    if width > 0 and height > 0:
+                        setup["size"] = (width, height)
+                except (TypeError, ValueError):
+                    pass
+            layers = entry.get("layers") or {}
+            if layers.get("enabled") is True:
+                for layer in layers.get("set") or []:
+                    for prop in layer.get("props") or []:
+                        if prop.get("name") == "on" and isinstance(prop.get("value"), bool) \
+                                and layer.get("name"):
+                            setup["layers"].append((str(layer["name"]), prop["value"]))
+            if camera.get("enabled") is True and camera.get("name"):
+                setup["camera"] = str(camera["name"])
+                try:
+                    setup["handle"] = int(camera.get("handle"))
+                except (TypeError, ValueError):
+                    pass
+            if frames.get("enabled") is True and str(frames.get("type")) == "0":
+                try:
+                    setup["frame"] = int(float(str(frames.get("single"))))
+                except (TypeError, ValueError):
+                    pass
+            if name:
+                setups.append(setup)
+        except Exception:
+            continue
+    return setups
+
+
+def pulze_camera(setup):
+    """Camera node of a setup, or None: by the handle when the node of that
+    handle still has the saved name, else by the name."""
+    name = setup["camera"]
+    if not name:
+        return None
+    node = None
+    try:
+        if setup["handle"] is not None:
+            node = rt.maxOps.getNodeByHandle(setup["handle"])
+    except Exception:
+        node = None
+    try:
+        if node is None or str(node.name) != name:
+            node = rt.getNodeByName(name)
+        if node is not None and rt.superClassOf(node) == rt.camera:
+            return node
+    except Exception:
+        pass
+    return None
+
+
+def pulze_shot(stem, setups=None):
+    """(camera or None, setup) of the Scene Manager setup an image is named
+    after (setup as in pulze_setups), or None; an exact name before one that
+    only starts alike."""
+    wanted = _norm(stem)
+    if not wanted:
+        return None
+    best = None
+    for setup in pulze_setups() if setups is None else setups:
+        name = _norm(setup["name"])
+        if name == wanted:
+            best = (0, setup)
+            break
+        if name and (wanted.startswith(name) or name.startswith(wanted)):
+            if best is None or len(name) > best[0]:
+                best = (len(name), setup)
+    if best is None:
+        return None
+    setup = best[1]
+    return pulze_camera(setup), setup
+
+
+def set_render_output(path, size):
+    """Render Setup as a setup has it: the output file (''-- left alone) and
+    the output size (None -- left alone). Returns what changed, as words for
+    the status line. The MAXScript reference asks for the Render Setup dialog
+    to be closed for such changes to stick; an open one is told to show them
+    (renderSceneDialog.update)."""
+    changed = []
+    path = path.replace("/", "\\")          # as 3ds Max keeps it
+    if path and str(rt.rendOutputFilename or "") != path:
+        rt.rendOutputFilename = path
+        changed.append("render output")
+    if size and (int(rt.renderWidth), int(rt.renderHeight)) != tuple(size):
+        rt.renderWidth, rt.renderHeight = size
+        changed.append("resolution")
+    if changed:
+        rt.renderSceneDialog.update()
+    return changed
+
+
+def show_layers(layers):
+    """Show and hide layers as a setup has them: [(layer name, shown)]. A
+    layer the scene no longer has is skipped. Returns how many changed."""
+    changed = 0
+    for name, on in layers:
+        layer = rt.LayerManager.getLayerFromName(name)
+        if layer is not None and bool(layer.on) != on:
+            layer.on = on
+            changed += 1
+    if changed:
+        rt.redrawViews()
+    return changed
+
+
+def go_to_frame(frame):
+    """Move the time slider to the frame. True when it moved."""
+    if int(rt.sliderTime.frame) == int(frame):
+        return False
+    rt.sliderTime = int(frame)
+    return True
+
+
+def no_image_message(keys):
+    """Status line for a scene none of whose names has an image: says what
+    was tried, so the user knows what to rename."""
+    tried = []
+    for source, name in keys:
+        text = "the {} '{}'".format(KEY_SOURCES[source], name)
+        if text not in tried:
+            tried.append(text)
+    return "No image named like {}.".format(" or ".join(tried))
+
+
 _background_view = None                     # index of the viewport the image was put on
 
 
@@ -1783,6 +2089,8 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
         self._view = None                   # camera viewport the image was last put on
         self._shown = None                  # path on the viewport right now
         self._matched = None                # image of the active setup
+        self._match_source = ""             # what it was found by, see KEY_SOURCES
+        self._picked = None                 # Scene Manager setup taken with a click, see _pick
         self._notes_folder = ""             # own folder for comment files, '' = auto
         self._notes = []                    # comments of the shown image
         self._notes_file = None             # (path, mtime) they were read from
@@ -2316,8 +2624,31 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
             self._load_notes()              # a comments file downloaded meanwhile
             self._update_counts()
 
+    def _scene_state(self):
+        """(render output name, handle of the viewed camera): what Scene
+        Manager changes when a setup is activated there."""
+        camera = view_camera()
+        try:
+            handle = int(rt.getHandleByAnim(camera)) if camera is not None else None
+        except Exception:
+            handle = None
+        return setup_key(), handle
+
+    def _pick(self, setup):
+        """A click took the camera and the frame of this Scene Manager setup.
+        The render output still names the setup last activated in Scene
+        Manager, so the picked one is the active setup here until the render
+        output or the viewed camera changes."""
+        self._picked = (setup, self._scene_state())
+
     def _sync(self, force=False):
-        key = setup_key()
+        keys = image_keys(view_camera())
+        if self._picked is not None:
+            if self._picked[1] == self._scene_state():
+                keys = [("setup", self._picked[0])] + keys
+            else:
+                self._picked = None
+        key = tuple(keys)
         try:
             camera = rt.viewport.getCamera()
             camera_name = camera.name if camera is not None else "no camera in the viewport"
@@ -2333,12 +2664,14 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
                 self._display(self._shown)
             return
         self._view = view
-        if key != self._key and self._key is not None and not self._images_match(key):
+        if key != self._key and self._key is not None \
+                and find_image(keys, self._images)[0] is None:
             # A setup rendered after the folder was read: look again.
             self._images = list_images(self._folder) if self._folder else []
         self._key = key
-        self.setup_label.setText(key or "No setup")
-        match = match_image(key, self._images)
+        match, source, name = find_image(keys, self._images)
+        self._match_source = source
+        self.setup_label.setText(name or (keys[0][1] if keys else "No setup"))
         self._matched = match
         if self.follow_btn.isChecked() or force:
             self._display(match)
@@ -2349,18 +2682,18 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
         elif not os.path.isdir(self._folder):
             self._set_dot("warn")
             self.set_status("Folder not found.", warn=True)
-        elif not key:
+        elif not keys:
             self._set_dot("off")
-            self.set_status("No render output file set in this scene.", warn=True)
+            self.set_status("No render output file set and no camera view: "
+                            "nothing to find the image by.", warn=True)
         elif match is None:
             self._set_dot("warn")
-            self.set_status("No image named like this setup.", warn=True)
+            self.set_status(no_image_message(keys), warn=True)
         else:
             self._set_dot("ok")
-            self.set_status("{} images".format(len(self._images)))
-
-    def _images_match(self, key):
-        return match_image(key, self._images) is not None
+            found_by = "" if source == "output" else ", found by the {}".format(
+                KEY_SOURCES[source])
+            self.set_status("{} images{}".format(len(self._images), found_by))
 
     def _display(self, path):
         """Show the image (None: nothing to show) if the display is on."""
@@ -2755,8 +3088,52 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
             QtCore.QTimer.singleShot(0, self._load_next_thumb)
 
     def _item_clicked(self, item):
-        """Show an image by hand; it stays until another setup is activated."""
-        self._display(item.data(Qt.UserRole))
+        """Show an image by hand; it stays until another setup is activated.
+        A camera named like the image (or with a Batch Render view saving to
+        that name) is put in the viewport with it: without Scene Manager that
+        is how a click goes to another shot. With setups of Scene Manager in
+        the scene file, the camera and the frame of the setup named like the
+        image are taken; the rest of the setup is Scene Manager's to apply."""
+        path = item.data(Qt.UserRole)
+        stem = os.path.splitext(os.path.basename(path))[0]
+        note = ""
+        try:
+            shot = pulze_shot(stem)
+            if shot is not None:
+                camera, saved = shot
+                setup, frame, layers = saved["name"], saved["frame"], saved["layers"]
+            else:
+                camera, frame, layers, saved = camera_for_image(stem), None, [], None
+            changed = camera is not None and look_through(camera)
+            if frame is not None and go_to_frame(frame):
+                changed = True
+            if layers:
+                show_layers(layers)
+            self._picked = None
+            taken = (["camera"] if camera is not None else []) \
+                + (["frame {}".format(frame)] if frame is not None else []) \
+                + (["layers"] if layers else [])
+            if saved is not None:
+                if set_render_output(saved["output"], saved["size"]):
+                    changed = True
+                taken += (["render output"] if saved["output"] else []) \
+                    + (["resolution"] if saved["size"] else [])
+            if shot is not None and taken:
+                self._pick(setup)
+                changed = True
+            if changed:
+                self._sync()                # the names of the scene changed with the camera
+            if shot is not None and taken:
+                note = "{} of the saved Scene Manager setup '{}'; the rest of it is " \
+                       "not applied.".format(
+                           taken[0] if len(taken) == 1
+                           else ", ".join(taken[:-1]) + " and " + taken[-1], setup)
+                note = note[0].upper() + note[1:]
+        except Exception as e:
+            self.set_status("Camera not changed: {}".format(e), warn=True)
+        self._display(path)
+        if note:
+            self.set_status(note)
 
     def _follow_toggled(self, on):
         _settings().setValue("follow", "true" if on else "false")

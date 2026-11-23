@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Scenes without Pulze Scene Manager: when no image is named like the render output, the
+  image is looked for by the output file of a Batch Render view of the viewed camera, then
+  by the name of that camera. The status line says what it was found by, and lists the
+  names tried when nothing fits.
+- A click on a preview puts the camera of that image in the viewport: the one with a Batch
+  Render view saving to that name, or the one named like the image.
+- In a scene with setups of Pulze Scene Manager 2 that click takes the camera, the frame,
+  the shown and hidden layers, the render output file and the resolution of the setup
+  named like the image, read from the saved scene file; the picked setup is the active one in the panel until another is activated
+  in Scene Manager or the camera is changed. The rest of the setup is not applied.
+
 ## a0.006
 
 ### Added

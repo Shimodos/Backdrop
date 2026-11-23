@@ -25,7 +25,9 @@ The renders in these screenshots are the author's own work.
 - **Follows the scene.** The image is found by name: the file name of the render output
   (*Render Setup → Common → Render Output*) is matched against the images of a folder.
   Activating another setup in [Pulze Scene Manager](https://www.pulze.io) changes that
-  field, and the picture changes with it. Any image can also be shown with a click.
+  field, and the picture changes with it. Without Scene Manager the image is found by a
+  Batch Render view of the camera or by the name of the camera. Any image can also be
+  shown with a click.
 - **Previews** of the folder with a badge of comments still open on each image.
 - **Dropbox comments on the viewport.** The file *Download comments* saves for an image is
   picked up by its name. Every comment is a frame with a numbered pin; the one picked in
@@ -43,7 +45,7 @@ The renders in these screenshots are the author's own work.
 | Action | How |
 | --- | --- |
 | Choose the folders | folder button in the header |
-| Show an image by hand | click its preview |
+| Show an image by hand, and go to its camera | click its preview |
 | Highlight a comment on the viewport | click its card (click again to let go) |
 | Tick a comment off | click the pin on its card |
 | Hide one comment on the viewport | click the eye on its card |
@@ -53,6 +55,46 @@ The renders in these screenshots are the author's own work.
 | Open the Google Drive guide | folder button → *How to connect Google Drive…* |
 | Forget the folders of the scene | folder button → *Clear the folders of this scene* |
 | Text size, colours, DeepL key | sliders button in the header |
+
+## Which image belongs to the scene
+
+The panel looks for an image of the folder named like one of these, in this order, and
+takes the first that has one:
+
+1. **The file name of the render output** (*Render Setup → Common → Render Output*). This
+   is what Pulze Scene Manager writes when a setup is activated.
+2. **The output file of a Batch Render view** of the camera the viewport looks through
+   (*Rendering → Batch Render*).
+3. **The name of that camera.**
+
+So without Scene Manager it is enough to name the cameras like the images, or to keep the
+output names in Batch Render. The status line says what the image was found by when it was
+not the render output, and when nothing fits it lists the names it tried. Case, spaces and
+separators do not matter, and a suffix on either side is allowed (`Kitchen_Cam01` finds
+`Kitchen_Cam01_v2.jpg`).
+
+A render output left over in an old scene can name the wrong image: it comes first, so
+clear it or set it right.
+
+It works the other way round too. A click on a preview shows that image, and if a camera
+is named like it (or has a Batch Render view saving to that name), the camera is put in
+the viewport: the camera view if there is one, else the active viewport. An image no
+camera is named after is just shown, and the view stays as it is.
+
+In a scene with setups of Scene Manager 2 a click takes the camera, the frame, the layers,
+the render output file and the resolution of the setup named like the image: animated
+light and props are where they were for that shot, the layers the setup shows and hides are
+shown and hidden, and a render started from 3ds Max goes to the file of that setup. Two
+setups on one camera and one frame that differ only in layers are told apart this way.
+Each of these is taken only if the setup sets it. The setups are read from the scene file
+as it was last saved: save the scene after changing them. A setup that renders a range
+leaves the time slider alone. Close the Render Setup dialog before clicking: 3ds Max may
+not keep the output and the resolution set while it is open.
+
+The rest of a setup (lights, render elements, overrides and so on) is applied by Scene
+Manager when the setup is activated there. Scene Manager has no command to select a setup
+from outside, so its own list still shows the setup chosen there, and a render started from
+Scene Manager uses that one.
 
 ## Comments
 
@@ -177,6 +219,11 @@ Found while testing, in case they save someone an evening:
 - `urllib` fails with "certificate has expired" when the Windows certificate stores hold
   expired certificates, which they usually do: Python loads them all. The SSL context is
   built from the stores without the expired ones.
+- Pulze Scene Manager 2 keeps its setups in the scene file, in the custom stream
+  `SMX_SceneData`: base64 of a JSON list with the name, the camera (name and node handle),
+  the frames, the layers (name and `on`), the render output file and the resolution of
+  every setup. `CustomFileStream.readStream` reads it from the file on
+  disk, without the scene being open.
 - A Python exception raised while a `QPainter` is active takes the whole 3ds Max process
   down, so painting is wrapped in `try / finally: painter.end()`.
 

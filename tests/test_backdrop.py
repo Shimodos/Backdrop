@@ -1012,6 +1012,93 @@ def run():
         check("panel: the folder menu opens the guide", opened == [mod.GUIDE_URL], opened)
     finally:
         mod.drive_call, mod.open_link = real_drive, real_open
+
+    # --- scenes without Scene Manager: Batch Render view, then the camera name ---
+    viewed = mod.view_camera()
+    camera_was = str(viewed.name)
+    check("names: the render output comes first, the camera name last",
+          mod.image_keys(viewed) == [("output", NAMES[3]), ("camera", camera_was)],
+          mod.image_keys(viewed))
+    count = len(panel._images)
+    activate(NAMES[2])
+    check("names: an image found by the render output says nothing more",
+          panel._match_source == "output"
+          and panel.status_label.text() == "{} images".format(count),
+          (panel._match_source, panel.status_label.text()))
+    activate("")
+    check("names: no output and a camera named like no image: told what was tried",
+          panel._matched is None and panel.status_label.text()
+          == "No image named like the camera name '{}'.".format(camera_was),
+          panel.status_label.text())
+    batch_view = rt.batchRenderMgr.CreateView(viewed)
+    batch_view.outputFilename = "F:\\Renderout\\EXR\\" + NAMES[1] + ".exr"
+    elsewhere = rt.Freecamera(name="Elsewhere")
+    rt.batchRenderMgr.CreateView(elsewhere).outputFilename = "F:\\Renderout\\" + NAMES[4] + ".exr"
+    rt.batchRenderMgr.CreateView(rt.undefined).outputFilename = "F:\\Renderout\\" + NAMES[0] + ".exr"
+    pump(900)
+    check("names: the Batch Render view of the viewed camera gives the image",
+          mod.batch_names(viewed) == [NAMES[1]] and panel._match_source == "batch"
+          and background() == NAMES[1] + ".jpg" and panel.setup_label.full == NAMES[1]
+          and panel.status_label.text()
+          == "{} images, found by the Batch Render view".format(count),
+          (mod.batch_names(viewed), panel._match_source, background(),
+           panel.status_label.text()))
+    batch_view.outputFilename = "F:\\Renderout\\EXR\\Unknown_view.exr"
+    viewed.name = NAMES[2]
+    pump(900)
+    check("names: with no image for the view, the camera name gives it",
+          panel._match_source == "camera" and background() == NAMES[2] + ".jpg"
+          and panel.status_label.text()
+          == "{} images, found by the camera name".format(count),
+          (panel._match_source, background(), panel.status_label.text()))
+    activate(NAMES[3])
+    check("names: a render output with an image wins over the camera name",
+          panel._match_source == "output" and background() == NAMES[3] + ".jpg",
+          (panel._match_source, background()))
+    activate("SK900-00_Nothing_Angle09")
+    check("names: a render output without an image falls through to the camera",
+          panel._match_source == "camera" and background() == NAMES[2] + ".jpg",
+          (panel._match_source, background()))
+
+    # A click on a preview goes to the camera of that image.
+    def click(name):
+        for row in range(panel.list.count()):
+            item = panel.list.item(row)
+            if os.path.basename(item.data(mod.ROLE_PATH)) == name + ".jpg":
+                panel._item_clicked(item)
+        pump(900)
+
+    def looking_through():
+        return str(mod.view_camera().name)
+
+    click(NAMES[4])
+    check("click: the camera with a Batch Render view of that name is put in the viewport",
+          looking_through() == "Elsewhere" and background() == NAMES[4] + ".jpg"
+          and panel._match_source == "batch" and panel.setup_label.full == NAMES[4],
+          (looking_through(), background(), panel._match_source))
+    named = rt.Freecamera(name=NAMES[0])
+    click(NAMES[0])
+    check("click: a camera named like the image is put in the viewport",
+          looking_through() == NAMES[0] and background() == NAMES[0] + ".jpg"
+          and panel._match_source == "camera", (looking_through(), background()))
+    click(NAMES[1])
+    check("click: an image no camera is named after is shown, the camera stays",
+          looking_through() == NAMES[0] and background() == NAMES[1] + ".jpg",
+          (looking_through(), background()))
+    check("click: a camera is found by the exact name before a name that starts alike",
+          str(mod.camera_for_image(NAMES[2]).name) == NAMES[2]
+          and mod.camera_for_image("Nothing_like_a_camera") is None)
+    rt.viewport.setCamera(viewed)
+    rt.delete(named)
+    viewed.name = camera_was
+    batch_view.outputFilename = ""
+    rt.delete(elsewhere)
+    pump(900)
+    check("names: nothing fits: every name tried is listed",
+          panel._matched is None and panel.status_label.text()
+          == "No image named like the render output 'SK900-00_Nothing_Angle09' "
+             "or the camera name '{}'.".format(camera_was), panel.status_label.text())
+    activate(NAMES[3])
     # --- folder menu with long paths ---
     deep = "D:\\Studio Dropbox\\Client_219_Kitchen_Sinks_Collection\\04_JPG\\" \
            "SK200-32_SK100-30_FC-2840BB_FC-2820SS_Scene_3"
@@ -1135,6 +1222,143 @@ def run():
           mod.stored_folder(mod.scene_path()) == images
           and mod.stored_folder(mod.scene_path(), "comments") == os.path.normpath(scenes),
           mod.stored_folder(mod.scene_path()))
+
+    # --- setups of Scene Manager 2 in the scene file: a click takes camera and frame ---
+    import base64
+    key14 = rt.Freecamera(name="Angle_Key14_Top")
+    key05 = rt.Freecamera(name="Angle_Key05_Top")
+    check("pulze: a scene file without setups has none", mod.pulze_setups() == [],
+          mod.pulze_setups())
+
+    faucet_a = rt.LayerManager.newLayerFromName("Faucet_A")
+    faucet_b = rt.LayerManager.newLayerFromName("Faucet_B")
+
+    size_was = (int(rt.renderWidth), int(rt.renderHeight))
+    out_file = "D:/out/04_EXR/Scene_3/" + NAMES[4] + ".exr"
+
+    def setup(name, camera, handle, frame, frames_on=True, kind=0, layers=None, layers_on=True,
+              output=None, size=None):
+        return {"version": 7, "scenename": {"text": name},
+                "output_Common": {"enabled": output is not None, "projectPath": "D:/out/",
+                                  "finalPath": output, "exist": True, "preset": []},
+                "resolution": {"enabled": size is not None,
+                               "width": str(size[0]) if size else "640",
+                               "height": str(size[1]) if size else "480",
+                               "ratio": "1.333", "locked": True},
+                "camera": {"enabled": camera is not None, "name": camera or "None",
+                           "handle": handle, "locked": False, "props": []},
+                "frames": {"enabled": frames_on, "type": kind, "single": str(frame),
+                           "start": 0, "end": 100, "nth": 1, "list": "1,3,5-12"},
+                "layers": {"enabled": layers_on, "set": [
+                    {"name": layer, "handle": layer,
+                     "props": [{"name": "on", "class": "BooleanClass", "value": on}]}
+                    for layer, on in layers or []]}}
+
+    def layers_shown():
+        return bool(faucet_a.on), bool(faucet_b.on)
+
+    saved = [setup(NAMES[0], "Angle_Key14_Top", int(key14.inode.handle), 14,
+                   layers=[("Faucet_A", True), ("Faucet_B", False)]),
+             setup(NAMES[1], "Angle_Key05_Top", 999999, 5,          # a handle of nothing
+                   layers=[("Faucet_A", False), ("Faucet_B", True), ("Gone_layer", True)]),
+             setup(NAMES[2], None, "None", 23,
+                   layers=[("Faucet_A", True), ("Faucet_B", True)], layers_on=False),
+             setup(NAMES[3], "Angle_Key14_Top", int(key14.inode.handle), 30, kind=1),
+             # the same camera and frame as the first, other layers
+             setup(NAMES[4], "Angle_Key14_Top", int(key14.inode.handle), 14,
+                   layers=[("Faucet_A", False), ("Faucet_B", True)],
+                   output=out_file, size=(3500, 2626))]
+    wrote = rt.CustomFileStream.writeStream(
+        first, mod.PULZE_STREAM, base64.b64encode(json.dumps(saved).encode("utf-8")).decode("ascii"))
+    read = mod.pulze_setups()
+    plain = {"output": "", "size": None}
+    check("pulze: the setups of the scene file are read", wrote and read == [
+        dict(plain, name=NAMES[0], camera="Angle_Key14_Top", handle=int(key14.inode.handle),
+             frame=14, layers=[("Faucet_A", True), ("Faucet_B", False)]),
+        dict(plain, name=NAMES[1], camera="Angle_Key05_Top", handle=999999, frame=5,
+             layers=[("Faucet_A", False), ("Faucet_B", True), ("Gone_layer", True)]),
+        dict(plain, name=NAMES[2], camera="", handle=None, frame=23, layers=[]),
+        dict(plain, name=NAMES[3], camera="Angle_Key14_Top", handle=int(key14.inode.handle),
+             frame=None, layers=[]),
+        dict(name=NAMES[4], camera="Angle_Key14_Top", handle=int(key14.inode.handle),
+             frame=14, layers=[("Faucet_A", False), ("Faucet_B", True)],
+             output=out_file, size=(3500, 2626))], (wrote, read))
+    rt.sliderTime = 0
+    activate(NAMES[3])                          # the setup active in Scene Manager
+    click(NAMES[0])
+    check("pulze: a click takes the camera, the frame and the layers of the setup",
+          looking_through() == "Angle_Key14_Top" and int(rt.sliderTime.frame) == 14
+          and layers_shown() == (True, False)
+          and background() == NAMES[0] + ".jpg" and panel.status_label.text()
+          == "Camera, frame 14 and layers of the saved Scene Manager setup '{}'; the rest "
+             "of it is not applied.".format(NAMES[0]),
+          (looking_through(), int(rt.sliderTime.frame), layers_shown(), background(),
+           panel.status_label.text()))
+    click(NAMES[4])
+    check("pulze: the same camera and frame with other layers: the layers change",
+          looking_through() == "Angle_Key14_Top" and int(rt.sliderTime.frame) == 14
+          and layers_shown() == (False, True) and panel.setup_label.full == NAMES[4]
+          and background() == NAMES[4] + ".jpg",
+          (looking_through(), layers_shown(), panel.setup_label.full, background()))
+    check("pulze: the click sets the render output and the resolution of the setup",
+          str(rt.rendOutputFilename) == out_file.replace("/", "\\")
+          and mod.set_render_output(out_file, (3500, 2626)) == []
+          and (int(rt.renderWidth), int(rt.renderHeight)) == (3500, 2626)
+          and panel.status_label.text()
+          == "Camera, frame 14, layers, render output and resolution of the saved Scene "
+             "Manager setup '{}'; the rest of it is not applied.".format(NAMES[4]),
+          (str(rt.rendOutputFilename), int(rt.renderWidth), int(rt.renderHeight),
+           panel.status_label.text()))
+    pump(1500)
+    check("pulze: the render output of the picked setup keeps it the active one",
+          panel.setup_label.full == NAMES[4] and background() == NAMES[4] + ".jpg",
+          (panel.setup_label.full, background()))
+    activate(NAMES[3])
+    click(NAMES[0])
+    check("pulze: a setup that sets no output or resolution leaves them alone",
+          mod.setup_key() == NAMES[3]
+          and (int(rt.renderWidth), int(rt.renderHeight)) == (3500, 2626),
+          (mod.setup_key(), int(rt.renderWidth), int(rt.renderHeight)))
+    pump(1500)
+    check("pulze: the picked setup is the active one, not the render output's",
+          mod.setup_key() == NAMES[3] and panel.setup_label.full == NAMES[0]
+          and panel._match_source == "setup"
+          and os.path.basename(panel._matched) == NAMES[0] + ".jpg",
+          (mod.setup_key(), panel.setup_label.full, panel._match_source, panel._matched))
+    rt.viewport.setCamera(key05)                # the camera changed elsewhere
+    pump(900)
+    check("pulze: another camera in the viewport gives the render output its say back",
+          panel.setup_label.full == NAMES[3] and panel._match_source == "output"
+          and background() == NAMES[3] + ".jpg",
+          (panel.setup_label.full, panel._match_source, background()))
+    click(NAMES[0])
+    activate(NAMES[2])                          # Scene Manager activated a setup
+    check("pulze: a setup activated in Scene Manager replaces the picked one",
+          panel.setup_label.full == NAMES[2] and background() == NAMES[2] + ".jpg",
+          (panel.setup_label.full, background()))
+    activate(NAMES[3])
+    click(NAMES[1])
+    check("pulze: a camera whose handle is gone is found by its name",
+          looking_through() == "Angle_Key05_Top" and int(rt.sliderTime.frame) == 5,
+          (looking_through(), int(rt.sliderTime.frame)))
+    check("pulze: a layer the scene no longer has is skipped, the others are set",
+          layers_shown() == (False, True), layers_shown())
+    click(NAMES[2])
+    check("pulze: a setup without a camera and with layers off moves the frame only",
+          looking_through() == "Angle_Key05_Top" and int(rt.sliderTime.frame) == 23
+          and layers_shown() == (False, True)
+          and panel.status_label.text().startswith("Frame 23 of the saved"),
+          (looking_through(), int(rt.sliderTime.frame), layers_shown(),
+           panel.status_label.text()))
+    click(NAMES[3])
+    check("pulze: a setup that renders a range leaves the time slider alone",
+          looking_through() == "Angle_Key14_Top" and int(rt.sliderTime.frame) == 23
+          and panel.status_label.text().startswith("Camera of the saved"),
+          (looking_through(), int(rt.sliderTime.frame), panel.status_label.text()))
+    rt.sliderTime = 0
+    rt.renderWidth, rt.renderHeight = size_was
+    rt.delete(key14)
+    rt.delete(key05)
     rt.resetMaxFile(rt.name("noPrompt"))    # File > New
     pump(900)
     check("new scene starts with no folders", panel._folder == "" and panel._notes_folder == ""

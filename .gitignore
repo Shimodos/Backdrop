@@ -1,6 +1,8 @@
 dist/
 tests/out/
 docs/mockups/
+# slides of the website carousel: rendered here, kept in the backdrop-site repository
+docs/shots/demo/
 tools/dropbox_comments_answer.json
 __pycache__/
 *.pyc

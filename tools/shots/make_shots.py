@@ -252,6 +252,100 @@ def run():
     grab(menu, os.path.join(OUT, "drive-menu.png"))
     menu.deleteLater()
 
+    # Slides of the carousel on the website (docs/shots/demo, with demo.json):
+    # the viewport and the panel in both themes, at 2x.
+    demo = os.path.join(OUT, "demo")
+    shutil.rmtree(demo, ignore_errors=True)
+    os.makedirs(demo)
+    captions = []
+    size = (VIEW_W + panel.width() + 48, panel.height() + 32)
+
+    def slide(caption, pick=None):
+        for mode in ("dark", "light"):
+            panel._theme_mode = mode
+            panel.apply_theme()
+            pump(200)
+            canvas = QtGui.QImage(size[0] * 2, size[1] * 2, QtGui.QImage.Format_ARGB32)
+            canvas.fill(QtGui.QColor("#15171b" if mode == "dark" else "#e6e9ee"))
+            painter = QtGui.QPainter(canvas)
+            try:
+                painter.setRenderHint(QtGui.QPainter.SmoothPixmapTransform)
+                painter.scale(2, 2)
+                top = 16 + (panel.height() - VIEW_H) // 2
+                if panel._shown:
+                    painter.drawImage(QtCore.QRect(16, top, VIEW_W, VIEW_H),
+                                      QtGui.QImage(panel._shown))
+                overlay.render(painter, QtCore.QPoint(16, top), QtGui.QRegion(),
+                               QtWidgets.QWidget.RenderFlags(QtWidgets.QWidget.DrawChildren))
+                left = VIEW_W + 32
+                panel.render(painter, QtCore.QPoint(left, 16))
+                if pick:
+                    panel._folder = "D:\\Project\\05_JPG\\Living_room"  # what the menu shows
+                    menu = panel.folder_menu()
+                    panel._folder = WORK
+                    menu.ensurePolished()
+                    menu.resize(menu.sizeHint())
+                    for action in menu.actions():
+                        if action.text() == pick:
+                            menu.setActiveAction(action)
+                    corner = panel.folder_btn.mapTo(panel, QtCore.QPoint(
+                        panel.folder_btn.width(), panel.folder_btn.height() + 2))
+                    menu.render(painter, QtCore.QPoint(left + corner.x() - menu.width(),
+                                                       16 + corner.y()))
+                    menu.deleteLater()
+            finally:
+                painter.end()
+            canvas.save(os.path.join(demo, "{}-{:02d}.png".format(mode, len(captions))))
+        captions.append(caption)
+
+    def unpick():
+        panel._selected = None
+        panel._fill_notes()
+        panel._draw_notes()
+
+    panel._folder = WORK
+    panel.set_source("dropbox")
+    unpick()
+    panel.set_status("6 images")
+    slide("The delivered render behind the camera viewport, the comments on top")
+    panel.select_note("1")
+    slide("Pick a comment: its frame lights up with the text")
+
+    # Translation: the answers of DeepL are made up here, nothing is sent.
+    russian = {FIRST[0][5]: "Опустите телевизор немного ниже и выровняйте его по центру "
+                            "стеновой панели, как на референсе",
+               FIRST[1][5]: "Передвиньте растение ближе к стене",
+               FIRST[2][5]: "Более тёплая ткань на кресле"}
+    settings.setValue("deepl_key", "demo:fx")
+    mod.deepl_translate = lambda key, texts: [russian.get(t, t) for t in texts]
+    panel.set_translate(True)
+    pump(800)
+    panel.set_status("6 images")
+    slide("Comments translated with DeepL, the original stays underneath")
+    panel.set_translate(False)
+    pump(200)
+
+    panel.notes_list.itemDelegate().toggle(panel.notes_list.model().index(0, 0))
+    pump(100)
+    panel.select_note("2")
+    slide("Tick a comment off when it is done; the badge counts what is left")
+
+    rt.rendOutputFilename = "D:\\Project\\04_EXR\\" + NAMES[3] + ".exr"
+    pump(1200)                              # the poll sees the other setup
+    unpick()
+    panel.set_status("6 images")
+    slide("Activate another setup: its image and its comments come up")
+
+    slide("Comments from Dropbox files or straight from Google Drive",
+          "Comments from: Google Drive")
+
+    import json
+    with open(os.path.join(demo, "demo.json"), "w", encoding="utf-8") as f:
+        json.dump({"width": size[0], "height": size[1], "themes": dict(
+            (mode, [{"image": "{}-{:02d}.png".format(mode, i), "caption": caption}
+                    for i, caption in enumerate(captions)])
+            for mode in ("dark", "light"))}, f, indent=2)
+
     panel.close()
     pump(100)
     QtCore.QSettings("AD Tools", "BackdropShots").clear()
