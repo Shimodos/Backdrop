@@ -16,8 +16,7 @@ is highlighted with its text:
 
 <img src="docs/shots/viewport.png" width="610" alt="Comment frames over the image">
 
-The photos in these screenshots stand in for renders
-([credits](tools/shots/images/CREDITS.md)).
+The renders in these screenshots are the author's own work.
 
 ## Features
 

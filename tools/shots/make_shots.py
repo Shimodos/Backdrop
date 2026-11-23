@@ -1,7 +1,7 @@
 """Screenshots of the panel for the README, rendered inside 3ds Max.
 
-Run through tools/make_shots.ps1 (3dsmaxbatch, nothing is shown). The photos
-of tools/shots/images stand in for renders (see CREDITS.md there). Writes
+Run through tools/make_shots.ps1 (3dsmaxbatch, nothing is shown). The renders
+of tools/shots/images are the delivered images (see CREDITS.md there). Writes
 docs/shots/panel-dark.png, panel-light.png (the panel itself, at 2x) and
 viewport.png (the comment frames over the image, as on the viewport).
 """
@@ -23,9 +23,8 @@ SRC = os.path.join(ROOT, "src", "backdrop.py")
 PHOTOS = os.path.join(ROOT, "tools", "shots", "images")
 OUT = os.path.join(ROOT, "docs", "shots")
 WORK = os.path.join(ROOT, "tests", "out", "shots")
-NAMES = ["SK100-30_FC-2840BB_Angle01", "SK100-30_FC-2840BB_Angle02",
-         "SK100-30_FC-2840BB_Angle03", "SK200-32_FC-2840BB_Angle01",
-         "SK200-32_FC-2840BB_Angle02", "SK200-32_FC-2840BB_Angle03"]
+NAMES = ["Living_Cam01", "Living_Cam02", "Living_Cam03",
+         "Dining_Cam01", "Kitchen_Cam01", "Kitchen_Cam02"]
 
 BLOCK = """
 Timestamp: {time}
@@ -43,15 +42,16 @@ Content: {text}
 
 ========================
 """
-# Comments on the first photo (a cup and a phone on a table by a window).
+# Comments on the first render (living room: TV wall, plant in a pot, armchair).
 FIRST = [
-    (0.555, 0.545, 0.200, 0.290, "Emily R.", "Move the cup closer to the edge of the table"),
-    (0.300, 0.770, 0.170, 0.150, "Emily R.", "Remove the phone"),
-    (0.560, 0.030, 0.300, 0.380, "Marc D.", "Too bright outside the window"),
+    (0.515, 0.395, 0.160, 0.185, "Emily R.", "Lower the TV a little"),
+    (0.735, 0.500, 0.170, 0.300, "Emily R.", "Move the plant closer to the wall"),
+    (0.225, 0.490, 0.120, 0.170, "Marc D.", "Warmer fabric on the armchair"),
 ]
+# ...and on the fourth (dining room: chandelier, plant by the window).
 FOURTH = [
-    (0.380, 0.400, 0.150, 0.220, "Emily R.", "Warmer white on the walls"),
-    (0.620, 0.450, 0.200, 0.200, "Emily R.", "More contrast here"),
+    (0.430, 0.270, 0.140, 0.150, "Emily R.", "A simpler chandelier"),
+    (0.640, 0.420, 0.120, 0.210, "Emily R.", "A taller plant"),
 ]
 
 
@@ -104,7 +104,7 @@ def run():
     rt.renderWidth, rt.renderHeight, rt.renderPixelAspect = 1200, 900, 1.0
     rt.rendOutputFilename = "D:\\Project\\04_EXR\\" + NAMES[0] + ".exr"
     try:
-        rt.viewport.setCamera(rt.Freecamera(name="Cam_Kitchen_Top_01"))
+        rt.viewport.setCamera(rt.Freecamera(name="Cam_Living_01"))
     except Exception:
         pass
 
