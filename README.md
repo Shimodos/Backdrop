@@ -20,7 +20,8 @@ The renders in these screenshots are the author's own work.
 
 ## Features
 
-- **The delivered image behind the viewport**, fitted to the render frame.
+- **The delivered image behind the camera viewport**, fitted to the render frame. Top,
+  side and perspective views stay clean.
 - **Follows the scene.** The image is found by name: the file name of the render output
   (*Render Setup → Common → Render Output*) is matched against the images of a folder.
   Activating another setup in [Pulze Scene Manager](https://www.pulze.io) changes that
@@ -30,6 +31,7 @@ The renders in these screenshots are the author's own work.
   picked up by its name. Every comment is a frame with a numbered pin; the one picked in
   the panel is highlighted with its text.
 - **Checklist.** A click on a pin in the list ticks the comment off; its pin goes grey.
+  The eye on a card hides that comment on the viewport.
 - **Translation** of the comments into Russian with DeepL and your own API key; the
   original stays under the translation.
 - Text size, colours and opacity of the frames.
@@ -42,6 +44,8 @@ The renders in these screenshots are the author's own work.
 | Show an image by hand | click its preview |
 | Highlight a comment on the viewport | click its card (click again to let go) |
 | Tick a comment off | click the pin on its card |
+| Hide one comment on the viewport | click the eye on its card |
+| Forget the folders of the scene | folder button → *Clear the folders of this scene* |
 | Text size, colours, DeepL key | sliders button in the header |
 
 ## Comments
@@ -119,7 +123,9 @@ Found while testing, in case they save someone an evening:
   code object of a function knows its own file.
 - The text of the `gw` viewport methods has one fixed font, and with Nitrous they only draw
   from a redraw callback. The frames here are painted by a transparent, click-through Qt
-  window kept over the active viewport.
+  window kept over the camera viewport.
+- `viewport.DispBkgImage` belongs to the active viewport and every viewport keeps its own.
+  To switch the image on in another one, `viewport.activeViewport` is changed for a moment.
 - There is no callback for a change of the render output path; it is polled.
 - `urllib` fails with "certificate has expired" when the Windows certificate stores hold
   expired certificates, which they usually do: Python loads them all. The SSL context is

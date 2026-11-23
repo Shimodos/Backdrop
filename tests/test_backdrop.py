@@ -173,7 +173,19 @@ def shown():
     return bool(rt.execute("viewport.DispBkgImage"))
 
 
-def activate(setup, folder="D:\\out\\04_EXR\\Scene_3", ext=".exr"):
+def shown_on():
+    """Indexes of the viewports with the background image displayed."""
+    active = int(rt.viewport.activeViewport)
+    result = []
+    for index in range(1, int(rt.viewport.numViews) + 1):
+        rt.execute("viewport.activeViewport = {}".format(index))
+        if shown():
+            result.append(index)
+    rt.execute("viewport.activeViewport = {}".format(active))
+    return result
+
+
+def activate(setup,folder="D:\\out\\04_EXR\\Scene_3", ext=".exr"):
     """What activating a Scene Manager setup does to Render Output - Common."""
     rt.rendOutputFilename = os.path.join(folder, setup + ext) if setup else ""
     pump(900)
@@ -182,6 +194,8 @@ def activate(setup, folder="D:\\out\\04_EXR\\Scene_3", ext=".exr"):
 def run():
     import __main__
     rt.resetMaxFile(rt.name("noPrompt"))
+    start_camera = rt.Freecamera(name="Start_camera")
+    rt.viewport.setCamera(start_camera)     # the image only goes on a camera view
     make_images()
     QtCore.QSettings("AD Tools", os.environ["BACKDROP_SETTINGS"]).clear()
 
@@ -661,12 +675,18 @@ def run():
     else:
         log("skip   Layer Manager not found at", layer_manager_src)
 
-    # --- frames only on a viewport that looks through a camera ---
+    # --- frames and the image only on a viewport that looks through a camera ---
+    activate(NAMES[1])
+    check("camera view: the image is on it", shown_on() == [1], shown_on())
+    rt.execute("viewport.setType #view_persp_user")
+    rt.delete(start_camera)
     rt.execute("viewport.setLayout #layout_4")
     check("no camera view: nowhere to draw", mod.camera_viewport() is None,
           mod.camera_viewport())
     overlay.follow_viewport()
     check("no camera view: overlay hidden", not overlay.isVisible())
+    pump(900)
+    check("no camera view: no image anywhere", shown_on() == [], shown_on())
     shot = rt.Freecamera(name="Shot_camera")
     rt.execute("viewport.activeViewport = 2")
     rt.viewport.setCamera(shot)
@@ -676,9 +696,25 @@ def run():
     check("another view active: frames stay on the camera view",
           str(rt.viewport.getType()) == "view_top" and mod.camera_viewport() == 2,
           (str(rt.viewport.getType()), mod.camera_viewport()))
+    pump(900)
+    check("a camera view appeared: the image goes there, not on the active view",
+          shown_on() == [2] and int(rt.viewport.activeViewport) == 1,
+          (shown_on(), int(rt.viewport.activeViewport)))
+    activate(NAMES[2])
+    check("another setup from the top view: still only the camera view",
+          shown_on() == [2] and background() == NAMES[2] + ".jpg"
+          and int(rt.viewport.activeViewport) == 1, (shown_on(), background()))
+    panel.show_btn.setChecked(False)
+    pump(50)
+    check("hide reaches the camera view from another one", shown_on() == [], shown_on())
+    panel.show_btn.setChecked(True)
+    pump(50)
+    check("show from another view puts it back", shown_on() == [2], shown_on())
     rt.execute("viewport.activeViewport = 3")
     rt.viewport.setCamera(shot)                     # a second camera view, and active
     check("the active camera view wins", mod.camera_viewport() == 3, mod.camera_viewport())
+    pump(900)
+    check("the image moves to the active camera view", shown_on() == [3], shown_on())
     rt.execute("viewport.setLayout #layout_1")
     rt.delete(shot)
 

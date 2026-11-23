@@ -1,7 +1,7 @@
 """
-Backdrop for 3ds Max  (a0.003)
+Backdrop for 3ds Max  (a0.004)
 
-Floating Qt panel that puts a finished render behind the active viewport, so
+Floating Qt panel that puts a finished render behind the camera viewport, so
 client corrections can be done right on top of the approved picture:
   - pick the folder with the delivered images (remembered per scene file)
   - the image is chosen by name: the file name of the render output
@@ -41,7 +41,7 @@ except ImportError:                         # 3ds Max 2021 - 2024
 import qtmax
 from pymxs import runtime as rt
 
-VERSION = "a0.003"
+VERSION = "a0.004"
 OBJECT_NAME = "ADToolsBackdrop"
 OVERLAY_NAME = "ADToolsBackdropOverlay"
 TEXT_SIZES = (("Small", 13), ("Medium", 18), ("Large", 24), ("Extra large", 32))
@@ -306,22 +306,58 @@ def match_image(key, images):
     return best[1] if best else None
 
 
+_background_view = None                     # index of the viewport the image was put on
+
+
+def _display_background(index, on):
+    """viewport.DispBkgImage belongs to the active viewport and each viewport
+    keeps its own (checked in 3ds Max 2026), so for another one that viewport
+    is made active for a moment."""
+    active = int(rt.viewport.activeViewport)
+    if index > int(rt.viewport.numViews):
+        return                              # the layout changed: no such view now
+    if index != active:
+        rt.execute("viewport.activeViewport = {}".format(index))
+    try:
+        rt.execute("viewport.DispBkgImage = {}".format("true" if on else "false"))
+    finally:
+        if index != active:
+            rt.execute("viewport.activeViewport = {}".format(active))
+
+
 def show_background(path):
-    """Put the image behind the active viewport, fitted to the render frame.
+    """Put the image behind the camera viewport, fitted to the render frame;
+    returns the index of that viewport, None when no view looks through a
+    camera (the image is a render, so it is shown nowhere then).
 
     backgroundImageFileName, setBkgImageAspect #output and
     InvalidateAllBackgrounds are the MAXScript 'Viewport Background Images'
     calls; viewport.DispBkgImage switches the display for the active view."""
-    rt.backgroundImageFileName = path
-    rt.setBkgImageAspect(rt.name("output"))
-    rt.setBkgImageAnimate(False)
-    rt.execute("viewport.DispBkgImage = true")
+    global _background_view
+    target = camera_viewport()
+    active = int(rt.viewport.activeViewport)
+    if active != target:                    # no switching needed to clear this one
+        rt.execute("viewport.DispBkgImage = false")
+    if _background_view not in (None, target, active):
+        _display_background(_background_view, False)
+    _background_view = target
+    if target is not None:
+        rt.backgroundImageFileName = path
+        rt.setBkgImageAspect(rt.name("output"))
+        rt.setBkgImageAnimate(False)
+        _display_background(target, True)
     rt.InvalidateAllBackgrounds()
     rt.completeRedraw()
+    return target
 
 
 def hide_background():
+    global _background_view
+    active = int(rt.viewport.activeViewport)
     rt.execute("viewport.DispBkgImage = false")
+    if _background_view not in (None, active):
+        _display_background(_background_view, False)
+    _background_view = None
     rt.InvalidateAllBackgrounds()
     rt.completeRedraw()
 
@@ -1318,6 +1354,7 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
         self._images = []                   # [(stem, path)]
         self._key = None                    # last seen setup name
         self._scene = None                  # last seen scene file
+        self._view = None                   # camera viewport the image was last put on
         self._shown = None                  # path on the viewport right now
         self._matched = None                # image of the active setup
         self._notes_folder = ""             # own folder for comment files, '' = auto
@@ -1718,8 +1755,14 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
             camera_name = ""
         if camera_name != self.camera_label.full:
             self.camera_label.setText(camera_name)
+        view = camera_viewport()
         if key == self._key and not force:
+            if view != self._view:
+                # A camera view was opened, closed or moved: the image follows.
+                self._view = view
+                self._display(self._shown)
             return
+        self._view = view
         if key != self._key and self._key is not None and not self._images_match(key):
             # A setup rendered after the folder was read: look again.
             self._images = list_images(self._folder) if self._folder else []

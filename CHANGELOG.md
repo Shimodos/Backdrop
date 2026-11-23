@@ -1,5 +1,19 @@
 # Changelog
 
+## a0.004
+
+### Added
+- An eye on every comment card hides that comment on the viewport without ticking it off.
+- *Clear the folders of this scene* in the folder menu.
+
+### Changed
+- The image and the comment frames are shown only on a viewport that looks through a
+  camera: the active one if it is a camera view, else the first camera view of the layout.
+  With no camera view nothing is shown. Before, the image went on whatever view was active
+  and the frames followed it.
+- Folders are kept strictly per scene: a new or another scene starts without folders
+  instead of taking over the last ones. *Save As* keeps the folders of the scene.
+
 ## a0.003
 
 ### Fixed
