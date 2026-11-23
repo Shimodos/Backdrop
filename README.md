@@ -26,8 +26,10 @@ The renders in these screenshots are the author's own work.
   (*Render Setup → Common → Render Output*) is matched against the images of a folder.
   Activating another setup in [Pulze Scene Manager](https://www.pulze.io) changes that
   field, and the picture changes with it. Without Scene Manager the image is found by a
-  Batch Render view of the camera or by the name of the camera. Any image can also be
-  shown with a click.
+  Batch Render view of the camera or by the name of the camera.
+- **A click goes to the shot.** Click a preview and the scene goes to that image: the
+  camera, and with Scene Manager 2 also the frame, the layers, the render output and the
+  resolution of its setup. See [Which image belongs to the scene](#which-image-belongs-to-the-scene).
 - **Previews** of the folder with a badge of comments still open on each image.
 - **Dropbox comments on the viewport.** The file *Download comments* saves for an image is
   picked up by its name. Every comment is a frame with a numbered pin; the one picked in
@@ -45,7 +47,7 @@ The renders in these screenshots are the author's own work.
 | Action | How |
 | --- | --- |
 | Choose the folders | folder button in the header |
-| Show an image by hand, and go to its camera | click its preview |
+| Show an image and go to its shot (camera, or Scene Manager setup) | click its preview |
 | Highlight a comment on the viewport | click its card (click again to let go) |
 | Tick a comment off | click the pin on its card |
 | Hide one comment on the viewport | click the eye on its card |
@@ -58,43 +60,88 @@ The renders in these screenshots are the author's own work.
 
 ## Which image belongs to the scene
 
-The panel looks for an image of the folder named like one of these, in this order, and
-takes the first that has one:
+The panel ties an image to a shot **by name**, in both directions:
 
-1. **The file name of the render output** (*Render Setup → Common → Render Output*). This
-   is what Pulze Scene Manager writes when a setup is activated.
-2. **The output file of a Batch Render view** of the camera the viewport looks through
-   (*Rendering → Batch Render*).
-3. **The name of that camera.**
+- **The scene changes → the image follows.** The panel finds the image named like the
+  shot the viewport is on and shows it with its comments.
+- **You click a preview → the scene follows.** The panel puts the scene on the shot that
+  image was rendered from.
 
-So without Scene Manager it is enough to name the cameras like the images, or to keep the
-output names in Batch Render. The status line says what the image was found by when it was
-not the render output, and when nothing fits it lists the names it tried. Case, spaces and
-separators do not matter, and a suffix on either side is allowed (`Kitchen_Cam01` finds
-`Kitchen_Cam01_v2.jpg`).
+What "the shot" is depends on whether the scene uses
+[Pulze Scene Manager](https://www.pulze.io). Both ways work in the same panel with nothing
+to switch.
 
-A render output left over in an old scene can name the wrong image: it comes first, so
-clear it or set it right.
+| | Without Scene Manager | With Scene Manager 2 |
+| --- | --- | --- |
+| What you name like the images | the cameras, or the output files in Batch Render | the setups (*Scene Name*) |
+| The image follows | the camera in the viewport | the setup activated in Scene Manager |
+| A click on a preview sets | the camera | camera, frame, layers, render output and resolution of the setup |
 
-It works the other way round too. A click on a preview shows that image, and if a camera
-is named like it (or has a Batch Render view saving to that name), the camera is put in
-the viewport: the camera view if there is one, else the active viewport. An image no
-camera is named after is just shown, and the view stays as it is.
+Names are compared loosely: case, spaces and separators do not matter, and a suffix on
+either side is allowed (`Kitchen_Cam01` finds `Kitchen_Cam01_v2.jpg`).
 
-In a scene with setups of Scene Manager 2 a click takes the camera, the frame, the layers,
-the render output file and the resolution of the setup named like the image: animated
-light and props are where they were for that shot, the layers the setup shows and hides are
-shown and hidden, and a render started from 3ds Max goes to the file of that setup. Two
-setups on one camera and one frame that differ only in layers are told apart this way.
-Each of these is taken only if the setup sets it. The setups are read from the scene file
-as it was last saved: save the scene after changing them. A setup that renders a range
-leaves the time slider alone. Close the Render Setup dialog before clicking: 3ds Max may
-not keep the output and the resolution set while it is open.
+### Without Scene Manager
 
-The rest of a setup (lights, render elements, overrides and so on) is applied by Scene
-Manager when the setup is activated there. Scene Manager has no command to select a setup
-from outside, so its own list still shows the setup chosen there, and a render started from
-Scene Manager uses that one.
+**Set up once.** Do one of the two:
+
+- name each camera like its image (camera `Kitchen_Cam01` for `Kitchen_Cam01.jpg`), or
+- keep a view per camera in *Rendering → Batch Render* whose *Output Path* file is named
+  like the image.
+
+**The image follows the camera.** Look through another camera and its image comes up. The
+panel tries, in this order, and takes the first name an image has:
+
+1. the file name of the render output (*Render Setup → Common → Render Output*);
+2. the output file of a Batch Render view of the camera in the viewport;
+3. the name of that camera.
+
+The status line says *found by the Batch Render view* or *found by the camera name*, and
+when nothing fits it lists the names it tried, so you see what to rename.
+
+**A click goes to the camera.** Click a preview and the camera with a Batch Render view
+saving to that name, or the camera named like the image, is put in the viewport (the camera
+view if there is one, else the active viewport). An image no camera is named after is just
+shown, and the view stays as it is.
+
+A render output left over in an old scene comes first and can name the wrong image: clear
+that field or set it right.
+
+### With Pulze Scene Manager 2
+
+**Nothing to set up**, as long as the setups are named like the images, which is what
+their output files are named by anyway.
+
+**The image follows the setup.** Activate a setup in Scene Manager and its image comes up:
+Scene Manager writes the render output, and the panel reads the file name from there.
+
+**A click goes to the setup.** Click a preview and the panel takes from the setup named
+like that image, as far as the setup sets each of them:
+
+- the **camera**;
+- the **frame** (*Time Output → Single*), so animated light and props are where they were
+  for that shot; a setup that renders a range leaves the time slider alone;
+- the **layers** it shows and hides, so two setups on one camera and one frame that differ
+  only in layers are told apart;
+- the **render output file** and the **resolution**, so a render started from 3ds Max goes
+  to the file of that setup.
+
+The status line names what was taken. The picked setup stays the active one in the panel
+until another setup is activated in Scene Manager or the camera is changed by hand.
+
+Three things to know:
+
+- **Save the scene after changing setups.** The panel reads them from the scene file as it
+  was last saved; a setup changed since then is the old one for the panel.
+- **Scene Manager does not know about the click.** It has no command to select a setup
+  from outside, so its own list still shows the setup chosen there, and a render started
+  *from Scene Manager* uses that one. The rest of a setup (lights, render elements,
+  overrides and so on) is applied only there.
+- **Close the Render Setup dialog before clicking.** 3ds Max may not keep an output file
+  and a resolution set from a script while it is open.
+
+This is read from the data of Scene Manager 2 (checked with 2.6.3). Scene Manager 3 keeps
+its setups differently: there the image still follows the active setup, and a click goes by
+the camera name or a Batch Render view, as without Scene Manager.
 
 ## Comments
 

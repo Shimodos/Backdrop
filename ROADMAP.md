@@ -38,8 +38,10 @@ an image, starting with Google Drive.
 
 ## Pulze Scene Manager 3
 
-Waits for Scene Manager 3 to leave beta. Scene Manager 2 has no call to activate a setup,
-so today the link works one way: a setup activated there changes the image here.
+Waits for Scene Manager 3 to leave beta. Scene Manager 2 has no call to activate a setup:
+a setup activated there changes the image here, and a click here takes the camera, frame,
+layers, render output and resolution of the setup from the scene file, while the list of
+Scene Manager stays on its own setup.
 
 - **A click on a preview activates its setup** in Scene Manager, through the local API of
   version 3.

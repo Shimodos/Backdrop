@@ -1,4 +1,4 @@
-name "Backdrop a0.006"
+name "Backdrop a0.007"
 version 2
 run "install.ms"
 drop "install.ms"

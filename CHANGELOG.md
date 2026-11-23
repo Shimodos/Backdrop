@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## a0.007
 
 ### Added
 - Scenes without Pulze Scene Manager: when no image is named like the render output, the
