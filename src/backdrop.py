@@ -1,5 +1,5 @@
 """
-Backdrop for 3ds Max  (a0.004)
+Backdrop for 3ds Max  (a0.005)
 
 Floating Qt panel that puts a finished render behind the camera viewport, so
 client corrections can be done right on top of the approved picture:
@@ -41,7 +41,7 @@ except ImportError:                         # 3ds Max 2021 - 2024
 import qtmax
 from pymxs import runtime as rt
 
-VERSION = "a0.004"
+VERSION = "a0.005"
 OBJECT_NAME = "ADToolsBackdrop"
 OVERLAY_NAME = "ADToolsBackdropOverlay"
 TEXT_SIZES = (("Small", 13), ("Medium", 18), ("Large", 24), ("Extra large", 32))
@@ -455,11 +455,13 @@ def load_thumbnail(path, size=QtCore.QSize(240, 180)):
 def parse_comments(text):
     """Comments of a Dropbox export as dicts: label, author, text and region
     (x, y, width, height as fractions of the image, origin top left; None for
-    a comment that is not attached to a place)."""
+    a comment that is not attached to a place). A comment without text is
+    left out: the export keeps such entries (author Unknown, no annotation),
+    Dropbox itself does not show them."""
     notes = []
     for block in re.split(r"(?m)^=+\s*$", text):
         content = re.search(r"(?ms)^Content:[ \t]?(.*?)(?=^Timestamp:|\Z)", block)
-        if content is None:
+        if content is None or not content.group(1).strip():
             continue
         region, label = None, None
         start = block.find("Annotation:")
@@ -545,6 +547,25 @@ def shown_text(note):
 
 def caption_of(note):
     return "{}  {}".format(note["label"], shown_text(note))[:60]
+
+
+def find_links(text):
+    """Web addresses in a comment, in order, each once; punctuation that ends
+    the sentence around an address is not part of it."""
+    links = []
+    for link in re.findall(r"https?://[^\s<>\"]+", text):
+        link = link.rstrip(".,;:!?)]}'")
+        if link and link not in links:
+            links.append(link)
+    return links
+
+
+def open_link(link):
+    QtGui.QDesktopServices.openUrl(QtCore.QUrl(link))
+
+
+def copy_text(text):
+    QtWidgets.QApplication.clipboard().setText(text)
 
 
 # ---------------------------------------------------------------------------
@@ -880,9 +901,6 @@ class CommentOverlay(QtWidgets.QWidget):
             pin_font = QtGui.QFont("Segoe UI")
             pin_font.setPixelSize(int(radius * 1.1))
             pin_font.setBold(True)
-            text_font = QtGui.QFont("Segoe UI")
-            text_font.setPixelSize(self.text_size)
-            text_font.setBold(True)
             grey = QtGui.QColor("#8a909a")
             shadow = QtGui.QColor(0, 0, 0, 95)
             picked = None
@@ -914,27 +932,62 @@ class CommentOverlay(QtWidgets.QWidget):
             if picked is not None:                  # on top of every frame
                 rect, note = picked
                 center = self._pin_center(rect, radius)
-                text = shown_text(note)
-                if len(text) > 90:
-                    text = text[:89] + "…"
-                metrics = QtGui.QFontMetrics(text_font)
+                doc = self.bubble_document(shown_text(note))
+                size = doc.size()
                 bubble = QtCore.QRectF(center.x() + radius + 5, center.y() - radius - 2,
-                                       metrics.horizontalAdvance(text) + 22,
-                                       2 * radius + 4)
+                                       size.width() + 2 * self.BUBBLE_PAD_X,
+                                       max(size.height() + 2 * self.BUBBLE_PAD_Y,
+                                           2 * radius + 4))
+                # A block of several lines would cover the place it is about:
+                # it goes above the frame, or under it, where there is room.
+                if bubble.height() > 2 * radius + 4:
+                    if rect.top() - radius - 4 - bubble.height() >= 2:
+                        bubble.moveBottom(rect.top() - radius - 4)
+                    elif rect.bottom() + 6 + bubble.height() <= self.height() - 2:
+                        bubble.moveTopLeft(QtCore.QPointF(rect.left(), rect.bottom() + 6))
                 if bubble.right() > self.width() - 2:       # keep it on screen
                     bubble.moveRight(self.width() - 2)
-                    bubble.moveTop(center.y() + radius + 4)
+                    if bubble.height() <= 2 * radius + 4:
+                        bubble.moveTop(center.y() + radius + 4)
+                if bubble.bottom() > self.height() - 2:
+                    bubble.moveBottom(self.height() - 2)
                 if bubble.left() < 2:
                     bubble.moveLeft(2)
+                if bubble.top() < 2:
+                    bubble.moveTop(2)
                 painter.setPen(QtGui.QPen(self.frame_color, 1.4))
                 painter.setBrush(QtGui.QColor(23, 24, 27, 240))
                 painter.drawRoundedRect(bubble, 8, 8)
-                painter.setFont(text_font)
-                painter.setPen(QtGui.QColor("#e7e9ec"))
-                painter.drawText(bubble.adjusted(11, 0, -11, 0),
-                                 int(Qt.AlignVCenter | Qt.AlignLeft), text)
+                context = QtGui.QAbstractTextDocumentLayout.PaintContext()
+                context.palette.setColor(QtGui.QPalette.Text, QtGui.QColor("#e7e9ec"))
+                painter.translate(bubble.left() + self.BUBBLE_PAD_X,
+                                  bubble.top() + (bubble.height() - size.height()) / 2.0)
+                doc.documentLayout().draw(painter, context)
         finally:
             painter.end()
+
+    BUBBLE_PAD_X = 11
+    BUBBLE_PAD_Y = 7
+
+    def bubble_document(self, text):
+        """The text of the picked comment laid out as a block: wrapped at words
+        (inside a word too when it is longer than a line, a web address) to a
+        width of about twenty letters' heights, narrower for a short text."""
+        font = QtGui.QFont("Segoe UI")
+        font.setPixelSize(self.text_size)
+        font.setBold(True)
+        doc = QtGui.QTextDocument()
+        doc.setDocumentMargin(0)
+        doc.setDefaultFont(font)
+        option = QtGui.QTextOption()
+        option.setWrapMode(QtGui.QTextOption.WrapAtWordBoundaryOrAnywhere)
+        doc.setDefaultTextOption(option)
+        doc.setPlainText(text)
+        limit = max(120.0, min(self.text_size * 20.0,
+                               self.width() - 2 * self.BUBBLE_PAD_X - 8))
+        doc.setTextWidth(limit)
+        doc.setTextWidth(min(limit, int(doc.idealWidth()) + 1))
+        return doc
 
     def _pin_center(self, rect, radius):
         """The pin sits on the top left corner of its frame, inside the window."""
@@ -1140,6 +1193,12 @@ class NoteList(QtWidgets.QListWidget):
         self.setVerticalScrollMode(QtWidgets.QAbstractItemView.ScrollPerPixel)
         self.setMouseTracking(True)
         self.setItemDelegate(NoteDelegate(self))
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.RightButton:
+            return                          # the card's menu; not a pick of the comment
+        super(NoteList, self).mousePressEvent(event)
 
     def resizeEvent(self, event):
         super(NoteList, self).resizeEvent(event)
@@ -1487,6 +1546,7 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
         self.notes_list.eyeClicked.connect(self.toggle_note_visible)
         self.notes_list.itemSelectionChanged.connect(self._note_selection_changed)
         self.notes_list.itemClicked.connect(self._note_clicked)
+        self.notes_list.customContextMenuRequested.connect(self.open_note_menu)
         main_layout.addWidget(self.notes_list, 4)
 
         # --- What is on the viewport ---
@@ -1927,6 +1987,40 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
             return
         self.notes_list.clearSelection()
         self.notes_list.setCurrentItem(None)
+
+    def note_menu(self, note):
+        """Menu of a comment card (right click): its text and the web
+        addresses in it to the clipboard, an address to the browser."""
+        menu = QtWidgets.QMenu(self)
+        menu.setStyleSheet(themed(MENU_STYLE))
+        menu.setToolTipsVisible(True)
+        metrics = QtGui.QFontMetrics(ui_font(12))
+        if note.get("shown"):
+            menu.addAction("Copy the translation").triggered.connect(
+                lambda _checked=False: copy_text(note["shown"]))
+            menu.addAction("Copy the original").triggered.connect(
+                lambda _checked=False: copy_text(note["text"]))
+        else:
+            menu.addAction("Copy the text").triggered.connect(
+                lambda _checked=False: copy_text(note["text"]))
+        for link in find_links(note["text"]):
+            menu.addSeparator()
+            title = menu.addAction(metrics.elidedText(link, Qt.ElideMiddle, 250))
+            title.setToolTip(link)
+            title.triggered.connect(lambda _checked=False, u=link: open_link(u))
+            menu.addAction("Open the link").triggered.connect(
+                lambda _checked=False, u=link: open_link(u))
+            menu.addAction("Copy the link").triggered.connect(
+                lambda _checked=False, u=link: copy_text(u))
+        return menu
+
+    def open_note_menu(self, pos):
+        row = self.notes_list.indexAt(pos).row()
+        if not 0 <= row < len(self._notes):
+            return
+        menu = self.note_menu(self._notes[row])
+        runner = getattr(menu, "exec", None) or getattr(menu, "exec_")
+        runner(self.notes_list.viewport().mapToGlobal(pos))
 
     def select_note(self, label):
         """Pick a comment (None: none): its frame is highlighted on the viewport."""

@@ -45,6 +45,7 @@ The renders in these screenshots are the author's own work.
 | Highlight a comment on the viewport | click its card (click again to let go) |
 | Tick a comment off | click the pin on its card |
 | Hide one comment on the viewport | click the eye on its card |
+| Copy a comment, open or copy a link in it | right click on its card |
 | Forget the folders of the scene | folder button → *Clear the folders of this scene* |
 | Text size, colours, DeepL key | sliders button in the header |
 

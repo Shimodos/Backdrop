@@ -304,6 +304,57 @@ def run():
     check("general comment has no region",
           mod.parse_comments("\nHead Comment:\nAuthor: A\nContent: all good\n")[0]["region"] is None)
 
+    # --- entries without text (Dropbox does not show them either) ---
+    empty = ("\nTimestamp: 2026-10-29T17:32:43.000Z\nAnnotation: No annotation\n\n"
+             "Head Comment:\nTimestamp: 2026-10-29T17:32:43.000Z\nAuthor: Unknown\nContent: \n\n"
+             "========================\n\n")
+    linked = ("\nTimestamp: 2026-10-29T19:35:36.000Z\nAnnotation: {\n  \"type\": \"image\",\n"
+              "  \"region\": { \"height\": 0.1, \"page\": 1, \"width\": 0.1, \"x\": 0.2, \"y\": 0.4 },\n"
+              "  \"label\": 3,\n  \"regionType\": \"rectangle\"\n}\n\n"
+              "Head Comment:\nTimestamp: 2026-10-29T19:35:36.000Z\nAuthor: Emily R.\n"
+              "Content: make the dish matte\n\nuse the bottle from this scene:\n"
+              "https://example.com/scl/fo/abc/Scene_D?dl=0&preview=Angle07.jpg&rlkey=xyz\n\n"
+              "========================\n")
+    notes = mod.parse_comments(empty + empty + linked)
+    check("comments without text are left out", len(notes) == 1 and notes[0]["label"] == "3"
+          and notes[0]["author"] == "Emily R.", [(n["label"], n["text"]) for n in notes])
+    link = "https://example.com/scl/fo/abc/Scene_D?dl=0&preview=Angle07.jpg&rlkey=xyz"
+    check("link found in a comment", mod.find_links(notes[0]["text"]) == [link],
+          mod.find_links(notes[0]["text"]))
+    check("links: sentence punctuation dropped, each once, none in plain text",
+          mod.find_links("see (https://a.example/x), then http://b.example/y. and https://a.example/x")
+          == ["https://a.example/x", "http://b.example/y"] and mod.find_links("no link here") == [],
+          mod.find_links("see (https://a.example/x), then http://b.example/y. and https://a.example/x"))
+
+    # --- menu of a comment card: nothing really reaches the clipboard or a browser ---
+    copied, opened = [], []
+    real_copy, real_open = mod.copy_text, mod.open_link
+    mod.copy_text, mod.open_link = copied.append, opened.append
+    try:
+        menu = panel.note_menu(notes[0])
+        titles = [a.text() for a in menu.actions() if not a.isSeparator()]
+        check("card menu: text and link actions", titles[0] == "Copy the text"
+              and titles[2:] == ["Open the link", "Copy the link"], titles)
+        for action in menu.actions():
+            if action.isEnabled() and not action.isSeparator():
+                action.trigger()
+        check("card menu: copies the text and the link; the address line opens it too",
+              copied == [notes[0]["text"], link] and opened == [link, link], (copied, opened))
+        del copied[:]
+        menu = panel.note_menu(dict(notes[0], shown="сделайте блюдце матовым"))
+        titles = [a.text() for a in menu.actions() if not a.isSeparator()]
+        check("card menu of a translated comment offers both texts",
+              titles[:2] == ["Copy the translation", "Copy the original"], titles)
+        menu.actions()[0].trigger()
+        menu.actions()[1].trigger()
+        check("translation and original are copied", copied == ["сделайте блюдце матовым",
+                                                                notes[0]["text"]], copied)
+        plain = panel.note_menu({"label": "1", "text": "all good", "author": "", "region": None})
+        check("card menu without a link: only the text",
+              [a.text() for a in plain.actions()] == ["Copy the text"])
+    finally:
+        mod.copy_text, mod.open_link = real_copy, real_open
+
     rt.renderWidth, rt.renderHeight, rt.renderPixelAspect = 3500, 2626, 1.0
     fit = list(rt.bd_fit(1000, 500))
     check("frame in a wide viewport", abs(fit[3] - 500) < 0.01
@@ -389,6 +440,31 @@ def run():
           mod.load_int("text_size", 0) == 32
           and mod.load_color("frame_color", "#000000").name() == "#ff0000"
           and mod.load_color("text_color", "#000000").name() == "#ffffff")
+
+    # --- the text of the picked comment is a block, not one long line ---
+    long_text = ("Make the soap dish more beige and not shiny or glossy. Use the bottle from "
+                 "this scene: https://example.com/scl/fo/abc/Scene_D?dl=0&preview=Angle07.jpg"
+                 "&rlkey=xyz&subfolder_nav_tracking=1")
+    doc = overlay.bubble_document(long_text)
+    line = QtGui.QFontMetrics(doc.defaultFont()).lineSpacing()
+    check("long comment is wrapped into a block",
+          doc.size().height() >= 3 * line and doc.size().width() <= 32 * 20 + 1,
+          (doc.size().width(), doc.size().height(), line))
+    short = overlay.bubble_document("ok")
+    check("short comment keeps a small bubble",
+          short.size().height() < 1.5 * line and short.size().width() < 100,
+          (short.size().width(), short.size().height()))
+    overlay.resize(300, 500)
+    check("the block is never wider than the viewport",
+          overlay.bubble_document(long_text).size().width() <= 300 - 22)
+    overlay.resize(1000, 500)
+    picked_note = [n for n in overlay.notes if n["label"] == "1"][0]
+    picked_note["shown"] = long_text
+    image.fill(0)
+    overlay.render(image, QtCore.QPoint(0, 0), QtGui.QRegion(),
+                   QtWidgets.QWidget.RenderFlags(QtWidgets.QWidget.DrawChildren))
+    image.save(os.path.join(OUT, "bubble_{}.png".format(YEAR)))
+    del picked_note["shown"]
 
     # --- checklist ---
     item = panel.notes_list.item(1)

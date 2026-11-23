@@ -1,5 +1,20 @@
 # Changelog
 
+## a0.005
+
+### Added
+- Right click on a comment card: copy its text (the translation or the original), open a
+  web address from the comment in the browser or copy it.
+
+### Changed
+- The text of the picked comment on the viewport is a block wrapped to several lines and
+  shown in full, placed above its frame or under it. Before, it was one line cut at 90
+  characters.
+
+### Fixed
+- Entries without text in a Dropbox export (author *Unknown*, no annotation) were shown as
+  empty cards. They are left out, as in Dropbox itself.
+
 ## a0.004
 
 ### Added
