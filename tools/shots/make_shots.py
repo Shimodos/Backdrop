@@ -18,6 +18,12 @@ except ImportError:
 
 from pymxs import runtime as rt
 
+# The scene is reset: never in a 3ds Max someone is working in.
+# maxOps.isInNonInteractiveMode() is true under 3dsmaxbatch (2024 and 2026).
+if not rt.maxOps.isInNonInteractiveMode():
+    raise RuntimeError("make_shots.py resets the scene: run it with tools/make_shots.ps1, "
+                       "not in an open 3ds Max")
+
 ROOT = os.environ["BD_ROOT"]
 SRC = os.path.join(ROOT, "src", "backdrop.py")
 PHOTOS = os.path.join(ROOT, "tools", "shots", "images")
@@ -44,7 +50,8 @@ Content: {text}
 """
 # Comments on the first render (living room: TV wall, plant in a pot, armchair).
 FIRST = [
-    (0.515, 0.395, 0.160, 0.185, "Emily R.", "Lower the TV a little"),
+    (0.515, 0.395, 0.160, 0.185, "Emily R.",
+     "Lower the TV a little and centre it on the wall panel, as in the reference"),
     (0.735, 0.500, 0.170, 0.300, "Emily R.", "Move the plant closer to the wall"),
     (0.225, 0.490, 0.120, 0.170, "Marc D.", "Warmer fabric on the armchair"),
 ]

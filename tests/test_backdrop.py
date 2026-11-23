@@ -20,6 +20,12 @@ except ImportError:
 
 from pymxs import runtime as rt
 
+# The checks reset and load scenes: never in a 3ds Max someone is working in.
+# maxOps.isInNonInteractiveMode() is true under 3dsmaxbatch (2024 and 2026).
+if not rt.maxOps.isInNonInteractiveMode():
+    raise RuntimeError("test_backdrop.py resets the scene: run it with tests/run_tests.ps1, "
+                       "not in an open 3ds Max")
+
 SRC = os.environ["BD_SRC"]
 OUT = os.environ["BD_OUT"]
 YEAR = int(list(rt.maxVersion())[7])
