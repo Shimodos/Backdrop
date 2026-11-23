@@ -477,7 +477,8 @@ fn bd_fit vw vh =
 fn bd_px v hi = (amax 1 (amin (hi - 2) (v as integer)))
 fn bd_draw =
 (
-    if bd_notes.count > 0 do
+    -- gw draws into the active viewport: only when that is a camera view.
+    if bd_notes.count > 0 and viewport.getType() == #view_camera do
     (
         local vw = gw.getWinSizeX(), vh = gw.getWinSizeY()
         local f = bd_fit vw vh
@@ -722,10 +723,33 @@ def fit_frame(width, height):
     return ((width - w) / 2.0, (height - h) / 2.0, w, h)
 
 
-def viewport_rect(main_window):
-    """Screen rectangle of the active viewport as a QRect, or None."""
+def camera_viewport():
+    """Index of the viewport the comment frames belong on, or None.
+
+    The frames mark places of a render, so they only make sense in a view
+    through a camera: the active viewport if it is one, else the first camera
+    view of the layout (the frames stay there while the user works in a top
+    or orthographic view). viewport.getType / getCamera / getHWnd take
+    index: -- checked in 3ds Max 2024 and 2026."""
     try:
-        hwnd = int(rt.viewport.getHWnd())
+        camera = rt.name("view_camera")
+        active = int(rt.viewport.activeViewport)
+        if rt.viewport.getType(index=active) == camera:
+            return active
+        for index in range(1, int(rt.viewport.numViews) + 1):
+            if rt.viewport.getType(index=index) == camera:
+                return index
+    except Exception:
+        pass
+    return None
+
+
+def viewport_rect(main_window, index=None):
+    """Screen rectangle of a viewport (the active one without an index) as a
+    QRect, or None."""
+    try:
+        hwnd = int(rt.viewport.getHWnd() if index is None
+                   else rt.viewport.getHWnd(index=index))
     except Exception:
         return None
     if not hwnd:
@@ -783,8 +807,10 @@ class CommentOverlay(QtWidgets.QWidget):
         self.update()
 
     def follow_viewport(self):
-        """Stay exactly over the active viewport as it moves or changes."""
-        rect = viewport_rect(self._main)
+        """Stay exactly over the camera viewport as it moves or changes;
+        with no view through a camera there is nowhere to draw."""
+        index = camera_viewport()
+        rect = viewport_rect(self._main, index) if index is not None else None
         if rect is None or rect.width() < 4 or rect.height() < 4 \
                 or not self._main.isVisible() or self._main.isMinimized():
             self.hide()

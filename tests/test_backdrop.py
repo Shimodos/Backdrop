@@ -661,6 +661,27 @@ def run():
     else:
         log("skip   Layer Manager not found at", layer_manager_src)
 
+    # --- frames only on a viewport that looks through a camera ---
+    rt.execute("viewport.setLayout #layout_4")
+    check("no camera view: nowhere to draw", mod.camera_viewport() is None,
+          mod.camera_viewport())
+    overlay.follow_viewport()
+    check("no camera view: overlay hidden", not overlay.isVisible())
+    shot = rt.Freecamera(name="Shot_camera")
+    rt.execute("viewport.activeViewport = 2")
+    rt.viewport.setCamera(shot)
+    check("camera view active: frames go there", mod.camera_viewport() == 2,
+          mod.camera_viewport())
+    rt.execute("viewport.activeViewport = 1")       # the user clicks into the top view
+    check("another view active: frames stay on the camera view",
+          str(rt.viewport.getType()) == "view_top" and mod.camera_viewport() == 2,
+          (str(rt.viewport.getType()), mod.camera_viewport()))
+    rt.execute("viewport.activeViewport = 3")
+    rt.viewport.setCamera(shot)                     # a second camera view, and active
+    check("the active camera view wins", mod.camera_viewport() == 3, mod.camera_viewport())
+    rt.execute("viewport.setLayout #layout_1")
+    rt.delete(shot)
+
     # --- folders belong to the scene they were chosen in ---
     scenes = os.path.join(IMAGES, "002")
     first = os.path.join(scenes, "scene_a.max")
