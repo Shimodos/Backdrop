@@ -30,6 +30,16 @@ an image, starting with Google Drive.
 - Target language as a setting (Russian is fixed today).
 - A second translator next to DeepL if its quality on short review notes is not enough.
 
+## Pulze Scene Manager 3
+
+Waits for Scene Manager 3 to leave beta. Scene Manager 2 has no call to activate a setup,
+so today the link works one way: a setup activated there changes the image here.
+
+- **A click on a preview activates its setup** in Scene Manager, through the local API of
+  version 3.
+- **The active setup asked from Scene Manager** instead of read from the file name of the
+  render output, which stays as the fallback for scenes without it.
+
 ## Panel
 
 - Website with screenshots and a demo, like the one of Layer Manager.
