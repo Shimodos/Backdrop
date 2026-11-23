@@ -1,5 +1,5 @@
 """
-Backdrop for 3ds Max  (a0.005)
+Backdrop for 3ds Max  (a0.006)
 
 Floating Qt panel that puts a finished render behind the camera viewport, so
 client corrections can be done right on top of the approved picture:
@@ -42,7 +42,7 @@ except ImportError:                         # 3ds Max 2021 - 2024
 import qtmax
 from pymxs import runtime as rt
 
-VERSION = "a0.005"
+VERSION = "a0.006"
 OBJECT_NAME = "ADToolsBackdrop"
 OVERLAY_NAME = "ADToolsBackdropOverlay"
 TEXT_SIZES = (("Small", 13), ("Medium", 18), ("Large", 24), ("Extra large", 32))

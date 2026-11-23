@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## a0.006
 
 ### Added
 - Comments of Google Drive by a link: *folder button → Google Drive link…* takes the link

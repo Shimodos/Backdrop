@@ -1,4 +1,4 @@
--- Backdrop a0.005 -- installer
+-- Backdrop a0.006 -- installer
 -- 1) Copies backdrop.py into <userscripts>\python (a directory searched by
 --    python.ExecuteFile, per Autodesk docs "Executing Python from MAXScript").
 -- 2) Copies the multi-resolution PNG icons into <usericons>\Dark|Light.
@@ -46,7 +46,7 @@
             python.ExecuteFile ((getDir #userScripts) + "\\python\\backdrop.py")
         )
 
-        messageBox ("Backdrop a0.005 installed.\n\n" +
+        messageBox ("Backdrop a0.006 installed.\n\n" +
                     "Script copied to:\n" + dstFile + "\n\n" +
                     "Customize > Customize User Interface > Toolbars,\n" +
                     "Category: \"AD Tools\", drag \"Backdrop\" onto a toolbar.") \
