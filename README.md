@@ -30,6 +30,8 @@ The renders in these screenshots are the author's own work.
 - **Dropbox comments on the viewport.** The file *Download comments* saves for an image is
   picked up by its name. Every comment is a frame with a numbered pin; the one picked in
   the panel is highlighted with its text.
+- **Google Drive comments by a link.** Give the link of the folder, sign in to Google in
+  the browser once, and the comments of every image are fetched, see below.
 - **Checklist.** A click on a pin in the list ticks the comment off; its pin goes grey.
   The eye on a card hides that comment on the viewport.
 - **Translation** of the comments into Russian with DeepL and your own API key; the
@@ -46,6 +48,9 @@ The renders in these screenshots are the author's own work.
 | Tick a comment off | click the pin on its card |
 | Hide one comment on the viewport | click the eye on its card |
 | Copy a comment, open or copy a link in it | right click on its card |
+| Fetch comments from Google Drive | folder button → *Google Drive link…* |
+| Switch between the comments of Dropbox and of Drive | folder button → *Comments from: …* |
+| Open the Google Drive guide | folder button → *How to connect Google Drive…* |
 | Forget the folders of the scene | folder button → *Clear the folders of this scene* |
 | Text size, colours, DeepL key | sliders button in the header |
 
@@ -55,6 +60,47 @@ In Dropbox open the image, then *Comments → ⋯ → Download comments*. Leave 
 Downloads, put it next to the images, or choose a folder for comment files in the folder
 menu. The name Dropbox gives it (`<image name> Dropbox File Comments.txt`) is how the
 panel finds it; of several downloads the newest is used.
+
+### Google Drive
+
+Drive has no download for comments, but its API gives them with the place on the image.
+The panel fetches them by a link, after you sign in to Google in your browser.
+
+**Step by step, with what to do when something goes wrong: [docs/google-drive.md](docs/google-drive.md).**
+In short:
+
+1. Once per computer: make an OAuth client of the type *Desktop app* in Google Cloud
+   Console (free), download its JSON file and pick it with *folder button → Google client
+   file…*.
+2. Per scene: *folder button → Google Drive link…*, paste the link of the folder with the
+   images or of one image. The first time the browser opens Google's sign-in.
+3. *Fetch the comments again* refreshes them later.
+
+A comment is matched to a local image by the file name, so the images in Drive must be
+named like the ones in the image folder. The panel asks for read-only access to Drive and
+reads the list of images of the linked folder and their comments, nothing else.
+
+A scene shows the comments of one service at a time: *folder button → Comments from:
+Dropbox files* or *Google Drive*. A fetch switches to Drive; removing the link or signing
+out switches back.
+
+<img src="docs/shots/sources.gif" width="760" alt="Switching between the comments of Dropbox and of Google Drive">
+
+The comments in it are made up for the picture.
+
+Without a sign-in a saved answer of the API is read too (with *Comments from: Google
+Drive* chosen):
+
+1. Open [comments.list](https://developers.google.com/workspace/drive/api/reference/rest/v3/comments/list)
+   and its *Try this method* form (the **API** icon at the right edge in a narrow window).
+2. `fileId` is the part of the image's link between `/d/` and `/view`; `fields` is `*`.
+   *Execute*, signed in to the account that can see the file.
+3. Save the answer as `<image name> Google Drive Comments.json` in the same places a
+   Dropbox file is looked for.
+
+Drive does not number comments, so they are numbered by the time they were made. The place
+of a comment is read from a field Google does not document; if that ever changes, the
+comments stay in the list without frames.
 
 Other clouds are planned, see [ROADMAP.md](ROADMAP.md).
 
@@ -92,7 +138,7 @@ installer/                install.ms, mzp.run and toolbar icons
 tests/                    checks that run inside 3ds Max
 tools/build_mzp.ps1       builds dist/Backdrop_<version>.mzp
 tools/make_icons.ps1      draws the toolbar icons and docs/icon-256.png
-tools/make_shots.ps1      renders docs/shots (the screenshots above)
+tools/make_shots.ps1      renders docs/shots (the screenshots and the animation; needs ffmpeg)
 ```
 
 Tests drive the real panel inside 3ds Max through `3dsmaxbatch.exe` (no window is shown)
@@ -138,5 +184,5 @@ Found while testing, in case they save someone an evening:
 
 MIT. Icons in the panel are drawn in the style of [Lucide](https://lucide.dev) (ISC).
 
-Autodesk and 3ds Max are trademarks of Autodesk, Inc. Dropbox, DeepL and Pulze are
+Autodesk and 3ds Max are trademarks of Autodesk, Inc. Dropbox, Google Drive, DeepL and Pulze are
 trademarks of their owners. This script is not affiliated with any of them.

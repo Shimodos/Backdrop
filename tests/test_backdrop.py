@@ -332,6 +332,60 @@ def run():
           == ["https://a.example/x", "http://b.example/y"] and mod.find_links("no link here") == [],
           mod.find_links("see (https://a.example/x), then http://b.example/y. and https://a.example/x"))
 
+    # --- Google Drive: the answer of comments.list saved as a file ---
+    def drive_comment(text, created, corners=None, **more):
+        anchor = json.dumps([None, [None, corners], None, "0Brevision"]) if corners else None
+        comment = {"kind": "drive#comment", "content": text, "createdTime": created,
+                   "deleted": False, "replies": [],
+                   "author": {"displayName": "Emily R.", "kind": "drive#user"}}
+        if anchor:
+            comment["anchor"] = anchor
+        comment.update(more)
+        return comment
+
+    drive = json.dumps({"kind": "drive#commentList", "comments": [
+        drive_comment("Faucet", "2026-11-23T12:37:04.769Z", [0.476, 0.172, 0.598, 0.465]),
+        drive_comment("gone", "2026-11-23T12:36:55.000Z", [0.1, 0.1, 0.2, 0.2], deleted=True),
+        drive_comment("", "2026-11-23T12:36:50.000Z", [0.1, 0.1, 0.2, 0.2]),
+        drive_comment("shift more left", "2026-11-23T12:36:49.824Z", [0.498, 0.442, 0.737, 0.618]),
+        drive_comment("general note", "2026-11-23T12:36:30.000Z"),
+        drive_comment("first one", "2026-11-23T12:36:23.252Z", [0.233, 0.182, 0.346, 0.331]),
+    ]})
+    from_drive = mod.parse_drive_comments(drive)
+    check("drive: numbered by time, deleted and empty left out",
+          [(n["label"], n["text"]) for n in from_drive]
+          == [("1", "first one"), ("2", "general note"), ("3", "shift more left"), ("4", "Faucet")],
+          [(n["label"], n["text"]) for n in from_drive])
+    region = from_drive[3]["region"]
+    check("drive: two corners become x, y, width, height",
+          region is not None and abs(region[0] - 0.476) < 1e-9 and abs(region[1] - 0.172) < 1e-9
+          and abs(region[2] - 0.122) < 1e-9 and abs(region[3] - 0.293) < 1e-9, region)
+    check("drive: comment without an anchor has no region, author and time read",
+          from_drive[1]["region"] is None and from_drive[0]["author"] == "Emily R."
+          and from_drive[0]["time"] == mod.local_time("2026-11-23T12:36:23.252Z") != "",
+          (from_drive[1]["region"], from_drive[0]["author"], from_drive[0]["time"]))
+    odd = json.dumps({"comments": [drive_comment("odd anchor", "2026-11-23T12:00:00.000Z",
+                                                 anchor='{"r":"head","a":[{"rect":{"x":1}}]}')]})
+    check("drive: an anchor of another shape gives a comment without a place",
+          [n["region"] for n in mod.parse_drive_comments(odd)] == [None])
+    check("drive: not JSON, or not a comment list, is no comments",
+          mod.parse_drive_comments("not json") == [] and mod.parse_drive_comments("[1, 2]") == []
+          and mod.parse_drive_comments("{}") == [])
+    drive_dir = os.path.join(OUT, "drive_{}".format(YEAR))
+    shutil.rmtree(drive_dir, ignore_errors=True)
+    os.makedirs(drive_dir)
+    for name in ("Shot_A.jpg Google Drive Comments.json", "Shot_B google drive comments.json",
+                 "other.json"):
+        with open(os.path.join(drive_dir, name), "w", encoding="utf-8") as f:
+            f.write(drive)
+    index = mod.index_comment_files([drive_dir])
+    check("drive: files are found by the name of the image",
+          sorted(index) == ["shot_a.jpg", "shot_b"], sorted(index))
+    found = mod.find_comments_file(os.path.join(drive_dir, "Shot_B.png"), [drive_dir])
+    check("drive: the image extension may be left out of the file name, the file is read",
+          os.path.basename(found or "") == "Shot_B google drive comments.json"
+          and len(mod.load_comments(found)) == 4, found)
+
     # --- menu of a comment card: nothing really reaches the clipboard or a browser ---
     copied, opened = [], []
     real_copy, real_open = mod.copy_text, mod.open_link
@@ -693,6 +747,271 @@ def run():
           mod.load_folder("c:\\work\\a.max", "comments") == own)
     check("another scene starts without one",
           mod.load_folder("c:\\work\\b.max", "comments") == "")
+
+    # --- Google Drive: comments fetched by a link after a sign-in ---
+    # Google itself is never called: drive_call is replaced. The listener the
+    # browser is sent back to is the real one, on 127.0.0.1.
+    import base64
+    import hashlib
+    import threading
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+    def local_get(url):
+        try:
+            with direct.open(url, timeout=5) as response:
+                return response.status
+        except urllib.error.HTTPError as e:
+            return e.code
+
+    check("drive link: folder, file and open?id are read, other addresses are not",
+          mod.drive_link_id("https://drive.google.com/drive/folders/1AbC_d-9?usp=sharing") == "1AbC_d-9"
+          and mod.drive_link_id("https://drive.google.com/file/d/1xYz-0_k/view?usp=drive_link") == "1xYz-0_k"
+          and mod.drive_link_id("https://drive.google.com/open?id=1Qq2") == "1Qq2"
+          and mod.drive_link_id("https://example.com/drive/folders/1AbC") == ""
+          and mod.drive_link_id("") == "")
+    verifier, challenge = mod.pkce_pair()
+    check("sign-in: the challenge is the hashed verifier",
+          43 <= len(verifier) <= 128 and challenge == base64.urlsafe_b64encode(
+              hashlib.sha256(verifier.encode("ascii")).digest()).decode("ascii").rstrip("=")
+          and mod.pkce_pair()[0] != verifier)
+    asked = urllib.parse.parse_qs(urllib.parse.urlsplit(
+        mod.drive_auth_url("ID.apps", "http://127.0.0.1:5000", "CH", "ST")).query)
+    check("sign-in: the address of Google's page",
+          asked == {"client_id": ["ID.apps"], "redirect_uri": ["http://127.0.0.1:5000"],
+                    "response_type": ["code"], "scope": [mod.DRIVE_SCOPE],
+                    "code_challenge": ["CH"], "code_challenge_method": ["S256"],
+                    "state": ["ST"]}, asked)
+
+    fetched_dir = os.path.join(OUT, "fetched_{}".format(YEAR))
+    shutil.rmtree(fetched_dir, ignore_errors=True)
+    os.makedirs(fetched_dir)
+    os.environ["BACKDROP_DRIVE"] = fetched_dir
+    client_file = os.path.join(fetched_dir, "client.json")
+    with open(client_file, "w", encoding="utf-8") as f:
+        json.dump({"installed": {"client_id": "ID.apps", "client_secret": "SEC",
+                                 "redirect_uris": ["http://localhost"]}}, f)
+    with open(os.path.join(fetched_dir, "other.json"), "w", encoding="utf-8") as f:
+        f.write("{\"kind\": \"drive#commentList\"}")
+    try:
+        mod.read_drive_client(os.path.join(fetched_dir, "other.json"))
+        refused = False
+    except ValueError:
+        refused = True
+    check("client file: id and secret are read, another JSON is refused",
+          mod.read_drive_client(client_file) == ("ID.apps", "SEC") and refused)
+
+    waiting = mod.DriveSignIn("ID.apps")
+    got = []
+    waiter = threading.Thread(target=lambda: got.append(waiting.wait(10)))
+    waiter.start()
+    stray = local_get(waiting.redirect + "/favicon.ico")
+    foreign = local_get(waiting.redirect + "/?state=other&code=EVIL")
+    still_waiting = waiter.is_alive()
+    answered = local_get(waiting.redirect + "/?state={}&code=CODE1".format(waiting.state))
+    waiter.join(5)
+    check("sign-in listener: only the answer with our state is taken",
+          (stray, foreign, still_waiting, answered, got) == (404, 404, True, 200, ["CODE1"]),
+          (stray, foreign, still_waiting, answered, got))
+    refusing = mod.DriveSignIn("ID.apps")
+    said = []
+
+    def wait_refused():
+        try:
+            refusing.wait(10)
+        except mod.DriveError as e:
+            said.append(str(e))
+    waiter = threading.Thread(target=wait_refused)
+    waiter.start()
+    local_get(refusing.redirect + "/?state={}&error=access_denied".format(refusing.state))
+    waiter.join(5)
+    check("sign-in listener: a refusal is told", said == [
+        "Google: the sign-in was refused (access_denied)."], said)
+
+    drive_calls = []
+    drive_state = {"expired": False}
+    image_name = NAMES[3] + ".jpg"
+
+    def fake_drive(url, form=None, token=""):
+        drive_calls.append((url, form, token))
+        if url == mod.DRIVE_TOKEN_URL:
+            if drive_state["expired"]:
+                raise mod.DriveError("Google Drive: error 400 (invalid_grant)", 400,
+                                     "invalid_grant")
+            if form["grant_type"] == "authorization_code":
+                return {"access_token": "AT1", "expires_in": 3599, "refresh_token": "RT"}
+            return {"access_token": "AT2", "expires_in": 3599}
+        parts = urllib.parse.urlsplit(url)
+        query = urllib.parse.parse_qs(parts.query)
+        if parts.path.endswith("/comments"):
+            file_id = parts.path.split("/")[-2]
+            if file_id == "img1" and "pageToken" not in query:
+                return {"nextPageToken": "c2", "comments": [
+                    drive_comment("Faucet", "2026-11-23T12:37:04.769Z", [0.4, 0.1, 0.6, 0.4])]}
+            if file_id == "img1":
+                return {"comments": [
+                    drive_comment("more left", "2026-11-23T12:36:49.824Z", [0.5, 0.4, 0.7, 0.6]),
+                    drive_comment("first one", "2026-11-23T12:36:23.252Z", [0.2, 0.2, 0.3, 0.3])]}
+            if file_id == "img3":
+                return {"comments": [drive_comment("odd", "2026-11-23T12:00:00.000Z")]}
+            return {"comments": []}
+        if parts.path.endswith("/files/FOLDER1"):
+            return {"id": "FOLDER1", "name": "renders", "mimeType": mod.DRIVE_FOLDER_TYPE}
+        if parts.path.endswith("/files/img1"):
+            return {"id": "img1", "name": image_name, "mimeType": "image/jpeg"}
+        if parts.path.endswith("/files") and "pageToken" not in query:
+            return {"nextPageToken": "f2", "files": [{"id": "img1", "name": image_name}]}
+        if parts.path.endswith("/files"):
+            return {"files": [{"id": "img2", "name": NAMES[0] + ".jpg"},
+                              {"id": "img3", "name": "odd:name?.png"}]}
+        raise mod.DriveError("Google Drive: nothing found", 404)
+
+    real_drive, real_open = mod.drive_call, mod.open_link
+    opened = []
+    mod.drive_call, mod.open_link = fake_drive, opened.append
+    folder_link = "https://drive.google.com/drive/folders/FOLDER1?usp=sharing"
+    try:
+        check("fetch: images of a folder over two pages, a file link is its one image",
+              mod.drive_images("AT", "FOLDER1") == [("img1", image_name), ("img2", NAMES[0] + ".jpg"),
+                                                    ("img3", "odd:name?.png")]
+              and mod.drive_images("AT", "img1") == [("img1", image_name)])
+        listing = urllib.parse.parse_qs(urllib.parse.urlsplit(drive_calls[1][0]).query)
+        check("fetch: the folder is asked for its images, with the token",
+              listing["q"] == ["'FOLDER1' in parents and trashed = false and "
+                               "mimeType contains 'image/'"] and drive_calls[1][2] == "AT",
+              listing)
+        counted = mod.fetch_drive_comments("AT", folder_link)
+        saved_to = mod.drive_folder(folder_link)
+        saved = sorted(os.listdir(saved_to))
+        check("fetch: a file per commented image, none for an image without comments",
+              counted == (2, 4) and os.path.dirname(saved_to) == fetched_dir
+              and saved == sorted([image_name + " Google Drive Comments.json",
+                                   "odd_name_.png Google Drive Comments.json"]),
+              (counted, saved))
+        first_file = os.path.join(saved_to, image_name + " Google Drive Comments.json")
+        check("fetch: the pages of comments are joined into one answer",
+              [n["text"] for n in mod.load_comments(first_file)]
+              == ["first one", "more left", "Faucet"])
+        stamp = os.path.getmtime(first_file)
+        time.sleep(1.1)
+        mod.fetch_drive_comments("AT", folder_link)
+        check("fetch: an unchanged file is not written again",
+              os.path.getmtime(first_file) == stamp)
+        shutil.rmtree(saved_to)
+
+        # The panel: client file, link, sign-in in the "browser", fetch.
+        panel.set_drive_link("https://example.com/folders/1")
+        check("panel: another address is not taken as a link",
+              panel._drive_link == "" and panel.status_label.text() == "Not a Google Drive link.")
+        panel.set_drive_link(folder_link)
+        check("panel: without a client file nothing is opened, the status says why",
+              opened == [] and not panel._drive_busy
+              and "client file" in panel.status_label.text(), panel.status_label.text())
+        del drive_calls[:]
+        panel.set_drive_client(client_file)
+        check("panel: the client file starts the sign-in in the browser",
+              mod.load_drive_client() == ("ID.apps", "SEC") and panel._drive_busy
+              and len(opened) == 1 and opened[0].startswith(mod.DRIVE_AUTH_URL + "?")
+              and "client_id=ID.apps" in opened[0]
+              and panel.status_label.text() == "Sign in to Google in the browser...",
+              (opened, panel.status_label.text()))
+        sign_in = panel._drive_sign_in
+        local_get(sign_in.redirect + "/?state={}&code=CODE2".format(sign_in.state))
+        end = time.time() + 10
+        while panel._drive_busy and time.time() < end:
+            pump(50)
+        token_form = drive_calls[0][1] if drive_calls else {}
+        check("panel: the code is changed for tokens with the verifier of this sign-in",
+              token_form == {"client_id": "ID.apps", "client_secret": "SEC", "code": "CODE2",
+                             "code_verifier": sign_in.verifier,
+                             "grant_type": "authorization_code",
+                             "redirect_uri": sign_in.redirect}
+              and mod.load_drive_refresh() == "RT" and drive_calls[1][2] == "AT1", token_form)
+        check("panel: the fetched comments are on the viewport",
+              drawn(panel) == 3 and not panel._drive_busy
+              and panel.status_label.text() == "Google Drive: 4 comments on 2 images."
+              and [n["text"] for n in panel._notes] == ["first one", "more left", "Faucet"],
+              (drawn(panel), panel.status_label.text()))
+        texts = [a.text() for a in panel.folder_menu().actions()]
+        check("panel: the folder menu has the link, the fetch and the sign-out",
+              "Google Drive link..." in texts and "Fetch the comments again" in texts
+              and "Google client file (saved)..." in texts and "Sign out of Google" in texts,
+              texts)
+        del drive_calls[:]
+        panel.fetch_drive()
+        end = time.time() + 10
+        while panel._drive_busy and time.time() < end:
+            pump(50)
+        check("panel: the next fetch signs in by itself, no browser",
+              len(opened) == 1 and drive_calls[0][1] == {
+                  "client_id": "ID.apps", "client_secret": "SEC",
+                  "grant_type": "refresh_token", "refresh_token": "RT"}
+              and drive_calls[1][2] == "AT2", drive_calls[:2])
+        drive_state["expired"] = True
+        panel.fetch_drive()
+        end = time.time() + 10
+        while panel._drive_busy and time.time() < end:
+            pump(50)
+        check("panel: a sign-in Google took back is forgotten and told",
+              mod.load_drive_refresh() == ""
+              and panel.status_label.text() == "Google: signed out. Fetch again to sign in.",
+              panel.status_label.text())
+        drive_state["expired"] = False
+        mod.save_folder("c:\\work\\a.max", folder_link, "drive")
+        check("panel: the link is kept per scene",
+              mod.load_folder("c:\\work\\a.max", "drive") == folder_link
+              and mod.load_folder("c:\\work\\b.max", "drive") == "")
+
+        # Both a downloaded Dropbox file (2 comments) and the fetched Drive
+        # file (3) are there for the shown image: the source is a choice.
+        mod.save_drive_refresh("RT")
+        after_fetch = (panel._source, drawn(panel))
+        panel.set_source("dropbox")
+        pump(50)
+        dropbox_only = (drawn(panel), os.path.basename(panel._notes_file[0]))
+        del drive_calls[:]
+        panel.set_source("drive")
+        end = time.time() + 10
+        while panel._drive_busy and time.time() < end:
+            pump(50)
+        drive_only = (drawn(panel), os.path.basename(panel._notes_file[0]))
+        check("source: a fetch shows Drive, the menu goes to the Dropbox files and back",
+              after_fetch == ("drive", 3)
+              and dropbox_only == (2, image_name + " Dropbox File Comments.txt")
+              and drive_only == (3, image_name + " Google Drive Comments.json"),
+              (after_fetch, dropbox_only, drive_only))
+        check("source: going to Drive fetches its comments anew",
+              len(drive_calls) > 1 and drive_calls[0][0] == mod.DRIVE_TOKEN_URL, drive_calls[:1])
+        ticked = [a.text() for a in panel.folder_menu().actions() if a.isChecked()]
+        check("source: the menu shows the choice", ticked == ["Comments from: Google Drive"],
+              ticked)
+        mod.save_folder("c:\\work\\a.max", "drive", "source")
+        check("source: kept per scene", mod.load_folder("c:\\work\\a.max", "source") == "drive"
+              and mod.load_folder("c:\\work\\b.max", "source") == "")
+        panel.drive_sign_out()
+        pump(50)
+        check("source: signing out of Google goes back to the Dropbox files",
+              panel._source == "dropbox" and drawn(panel) == 2
+              and mod.load_drive_refresh() == ""
+              and panel.status_label.text() == "Signed out of Google.",
+              (panel._source, drawn(panel)))
+        panel.set_source("drive", fetch=False)
+        pump(50)
+        panel.set_drive_link("")
+        pump(50)
+        check("panel: without the link the downloaded files are shown again",
+              drawn(panel) == 2 and panel._drive_link == "" and panel._source == "dropbox",
+              (drawn(panel), panel._source))
+        del opened[:]
+        guide = [a for a in panel.folder_menu().actions()
+                 if a.text() == "How to connect Google Drive..."]
+        if guide:
+            guide[0].trigger()
+        check("panel: the folder menu opens the guide", opened == [mod.GUIDE_URL], opened)
+    finally:
+        mod.drive_call, mod.open_link = real_drive, real_open
     # --- folder menu with long paths ---
     deep = "D:\\Studio Dropbox\\Client_219_Kitchen_Sinks_Collection\\04_JPG\\" \
            "SK200-32_SK100-30_FC-2840BB_FC-2820SS_Scene_3"
@@ -703,8 +1022,8 @@ def run():
     check("folder menu stays narrow with long paths", menu.sizeHint().width() <= 380,
           menu.sizeHint().width())
     check("folder menu: whole path in the tooltip",
-          [a.toolTip() for a in lines] == [deep, deep + "\\Comments"]
-          and all("…" in a.text() for a in lines), [a.text() for a in lines])
+          [a.toolTip() for a in lines] == [deep, deep + "\\Comments", "no link"]
+          and all("…" in a.text() for a in lines[:2]), [a.text() for a in lines])
     panel._folder, panel._notes_folder = kept
     menu.deleteLater()
 

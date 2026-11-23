@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Comments of Google Drive by a link: *folder button → Google Drive link…* takes the link
+  of a folder or of one image, the browser opens Google's sign-in, and the comments of
+  every image are fetched with their frames. Needs an OAuth client of your own, chosen
+  with *Google client file…*; the link is kept per scene. Guide: `docs/google-drive.md`.
+  It opens from the panel: *folder button → How to connect Google Drive…*
+- *Comments from: Dropbox files / Google Drive* in the folder menu: a scene shows the
+  comments of one service at a time. A fetch switches to Drive, removing the link or
+  signing out of Google switches back to the Dropbox files.
+- The answer of the Drive API method `comments.list`, saved by hand as
+  `<image name> Google Drive Comments.json`, is read like a Dropbox file.
+
 ## a0.005
 
 ### Added

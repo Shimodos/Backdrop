@@ -11,8 +11,10 @@ an image, starting with Google Drive.
 - **Sources as plug-ins.** One small reader per service, each turning its export or API
   answer into the same list the panel already draws: text, author, time and a region as
   fractions of the image. The cards, the pins and the translation stay as they are.
-- **Google Drive** first. To find out before any code: whether its API or an export gives
-  the region of a comment on an image, not only the text.
+- **Google Drive**: done, by a link with a sign-in or from a saved answer of the API
+  method `comments.list`. Its `anchor` holds the two corners of the region as fractions of
+  the image; that is what the Drive preview writes, not a documented format. Still to do:
+  replies and resolved comments, which the sample it was built on did not have.
 - **Other services** with region comments on images, picked by what users of the panel
   actually deliver through.
 - **Choosing the source**: by the file found next to the image where the format tells,
@@ -23,7 +25,11 @@ an image, starting with Google Drive.
 - **Dropbox.** The public API has no comments endpoint. An undocumented route
   (`comments2/list_comments`) still answers; whether it works with an app token and
   returns regions is not known yet. `tools/test_dropbox_comments.ps1` asks it.
-- For services with a documented comments API: sign in once, then refresh from the panel.
+- **Google Drive.** Done with the user's own OAuth client. Still to do: a client shipped
+  with the panel, so nobody has to make one. That needs the app verified by Google (the
+  scope `drive.readonly` is a restricted one); unverified it is limited to 100 users and
+  shows a warning at the sign-in.
+- For other services with a documented comments API: the same.
 
 ## Translation
 

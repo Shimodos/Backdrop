@@ -32,6 +32,7 @@ import json
 import os
 import re
 import threading
+import time
 
 try:                                     # 3ds Max 2025+
     from PySide6 import QtCore, QtGui, QtWidgets, QtSvg
@@ -48,6 +49,12 @@ TEXT_SIZES = (("Small", 13), ("Medium", 18), ("Large", 24), ("Extra large", 32))
 POLL_INTERVAL_MS = 400
 IMAGE_TYPES = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp", ".tga")
 COMMENTS_SUFFIX = " Dropbox File Comments"  # "<image name> Dropbox File Comments.txt"
+DRIVE_SUFFIX = " Google Drive Comments"     # "<image name> Google Drive Comments.json"
+COMMENT_FILES = ((COMMENTS_SUFFIX, ".txt"), (DRIVE_SUFFIX, ".json"))
+# Whose comments a scene shows, one or the other: (stored value, menu text, kinds).
+SOURCES = (("dropbox", "Dropbox files", COMMENT_FILES[:1]),
+           ("drive", "Google Drive", COMMENT_FILES[1:]))
+GUIDE_URL = "https://github.com/Shimodos/Backdrop/blob/main/docs/google-drive.md"
 COMMENTS_EVERY = 5                          # polls between looks for a comments file
 
 Qt = QtCore.Qt
@@ -365,27 +372,40 @@ def hide_background():
 # ---------------------------------------------------------------------------
 # Dropbox comments: the file "Download comments" saves, drawn over the viewport
 # ---------------------------------------------------------------------------
-def comment_folders(image_folder, override=""):
+def comment_folders(image_folder, override="", fetched=""):
     """Where a downloaded comments file is looked for: the folder chosen for
-    comments, else next to the images and in the browser's Downloads."""
+    comments, else next to the images and in the browser's Downloads. On top
+    of that the folder the comments of a Google Drive link are fetched to."""
     if override:
-        return [override]
-    # BACKDROP_DOWNLOADS: the tests point this away from the user's folder.
-    downloads = os.environ.get("BACKDROP_DOWNLOADS") or os.path.join(
-        os.path.expanduser("~"), "Downloads")
-    return [image_folder, downloads]
+        folders = [override]
+    else:
+        # BACKDROP_DOWNLOADS: the tests point this away from the user's folder.
+        downloads = os.environ.get("BACKDROP_DOWNLOADS") or os.path.join(
+            os.path.expanduser("~"), "Downloads")
+        folders = [image_folder, downloads]
+    return folders + [fetched] if fetched else folders
 
 
-def find_comments_file(image_path, folders):
+def find_comments_file(image_path, folders, source=None):
     """Newest '<image name> Dropbox File Comments*.txt' (a repeated download
-    gets ' (1)' added by the browser), or None."""
-    return index_comment_files(folders).get(os.path.basename(image_path).lower())
+    gets ' (1)' added by the browser) or '<image name> Google Drive
+    Comments*.json', or None. source: see SOURCES."""
+    return comments_file_of(index_comment_files(folders, source), image_path)
 
 
-def index_comment_files(folders):
+def comments_file_of(index, image_path):
+    """The comments file of an image in an index_comment_files() result. A
+    file named by hand may leave the extension of the image out."""
+    name = os.path.basename(image_path).lower()
+    return index.get(name) or index.get(os.path.splitext(name)[0])
+
+
+def index_comment_files(folders, source=None):
     """{image file name in lower case: its newest comments file} for every
-    comments file in the folders."""
-    suffix = COMMENTS_SUFFIX.lower()
+    comments file in the folders, of the kinds the source takes (SOURCES;
+    None: of every kind)."""
+    taken = dict((value, kinds) for value, _text, kinds in SOURCES).get(source, COMMENT_FILES)
+    kinds = [(suffix.lower(), ext) for suffix, ext in taken]
     best = {}
     for folder in folders:
         try:
@@ -394,8 +414,12 @@ def index_comment_files(folders):
             continue
         for name in names:
             low = name.lower()
-            cut = low.find(suffix)
-            if cut <= 0 or not low.endswith(".txt"):
+            cut = -1
+            for suffix, ext in kinds:
+                if low.endswith(ext) and low.find(suffix) > 0:
+                    cut = low.find(suffix)
+                    break
+            if cut <= 0:
                 continue
             path = os.path.join(folder, name)
             try:
@@ -486,12 +510,52 @@ def parse_comments(text):
     return notes
 
 
+def parse_drive_comments(text):
+    """Comments of Google Drive as the same dicts: the JSON answer of the
+    Drive API method comments.list (fields=*), saved to a file.
+
+    The place of a comment made in the Drive preview is in "anchor", a JSON
+    string [null, [null, [x1, y1, x2, y2]], null, "<revision>"] with the two
+    corners as fractions of the image, origin top left. That is what Drive
+    writes today (checked on comments of an image), not a documented format,
+    so anything else there gives a comment without a place. Drive has no
+    numbers: the comments are numbered by the time they were made. Deleted
+    ones and ones without text are left out."""
+    try:
+        data = json.loads(text)
+        found = data.get("comments") or []
+    except (ValueError, AttributeError):
+        return []
+    found = [c for c in found if isinstance(c, dict) and not c.get("deleted")
+             and str(c.get("content") or "").strip()]
+    found.sort(key=lambda c: str(c.get("createdTime") or ""))
+    notes = []
+    for comment in found:
+        region = None
+        try:
+            x1, y1, x2, y2 = (float(v) for v in json.loads(comment.get("anchor") or "")[1][1])
+            region = (min(x1, x2), min(y1, y2), abs(x2 - x1), abs(y2 - y1))
+        except (ValueError, TypeError, IndexError, KeyError):
+            region = None
+        notes.append({
+            "label": str(len(notes) + 1),
+            "author": str((comment.get("author") or {}).get("displayName") or ""),
+            "time": local_time(str(comment.get("createdTime") or "")),
+            "text": " ".join(str(comment["content"]).split()),
+            "region": region,
+        })
+    return notes
+
+
 def load_comments(path):
     try:
         with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
-            return parse_comments(f.read())
+            text = f.read()
     except OSError:
         return []
+    if path.lower().endswith(".json"):
+        return parse_drive_comments(text)
+    return parse_comments(text)
 
 
 # The frames are drawn by MAXScript in a viewport redraw callback: with
@@ -762,6 +826,309 @@ class Translator(QtCore.QObject):
             self.checked.emit(deepl_usage(key), "")
         except Exception as e:
             self.checked.emit(None, str(e))
+
+
+# ---------------------------------------------------------------------------
+# Google Drive: the comments fetched by a link, after a sign-in to Google
+#
+# developers.google.com/identity/protocols/oauth2/native-app: the browser of
+# the system shows Google's sign-in, Google sends it back to a listener on
+# 127.0.0.1 with a code, the code is changed for tokens (PKCE). The OAuth
+# client ("Desktop app") is the user's own, from Google Cloud Console.
+# ---------------------------------------------------------------------------
+DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+DRIVE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+DRIVE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+DRIVE_API = "https://www.googleapis.com/drive/v3/files"
+DRIVE_FOLDER_TYPE = "application/vnd.google-apps.folder"
+DRIVE_SIGN_IN_SECONDS = 300                 # how long the browser is waited for
+DRIVE_ERRORS = {401: "Google Drive: the sign-in was not accepted.",
+                403: "Google Drive: this account has no access to the link.",
+                404: "Google Drive: nothing found by this link for this account."}
+SIGNED_IN_PAGE = ("<html><body style='font-family:Segoe UI,sans-serif;margin:3em'>"
+                  "<h3>Backdrop</h3><p>{}</p></body></html>")
+
+
+class DriveError(RuntimeError):
+    """A Google call that failed: the message for the status line, the HTTP
+    status and Google's own error code ("invalid_grant", ...)."""
+
+    def __init__(self, message, status=0, reason=""):
+        super(DriveError, self).__init__(message)
+        self.status = status
+        self.reason = reason
+
+
+def drive_link_id(link):
+    """Id of the file or the folder a Google Drive link points to, or ''."""
+    link = (link or "").strip()
+    if "google.com/" not in link:
+        return ""
+    for pattern in (r"/folders/([\w-]+)", r"/file/d/([\w-]+)", r"[?&]id=([\w-]+)"):
+        found = re.search(pattern, link)
+        if found:
+            return found.group(1)
+    return ""
+
+
+def read_drive_client(path):
+    """(client id, client secret) from the JSON file Google Cloud Console
+    gives for an OAuth client; raises ValueError when it is not one."""
+    try:
+        with open(path, "r", encoding="utf-8-sig") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        raise ValueError("not a JSON file")
+    blocks = [data] + list(data.values()) if isinstance(data, dict) else []
+    for block in blocks:
+        if isinstance(block, dict) and block.get("client_id"):
+            return str(block["client_id"]), str(block.get("client_secret") or "")
+    raise ValueError("no client_id in it")
+
+
+def pkce_pair():
+    """(code verifier, code challenge) of one sign-in: the challenge is
+    BASE64URL(SHA256(verifier)) without padding."""
+    import base64
+    import secrets
+    verifier = secrets.token_urlsafe(64)            # 86 characters of [A-Za-z0-9_-]
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    return verifier, base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+
+def drive_auth_url(client_id, redirect, challenge, state):
+    import urllib.parse
+    return DRIVE_AUTH_URL + "?" + urllib.parse.urlencode({
+        "client_id": client_id, "redirect_uri": redirect, "response_type": "code",
+        "scope": DRIVE_SCOPE, "code_challenge": challenge,
+        "code_challenge_method": "S256", "state": state})
+
+
+def drive_call(url, form=None, token=""):
+    """JSON answer of a Google call: a POST of the form when there is one,
+    else a GET with the access token. Raises DriveError."""
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    headers = {"Authorization": "Bearer " + token} if token else {}
+    body = None
+    if form is not None:
+        body = urllib.parse.urlencode(form).encode("ascii")
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+    try:
+        request = urllib.request.Request(url, data=body, headers=headers,
+                                         method="POST" if body is not None else "GET")
+        with urllib.request.urlopen(request, timeout=30, context=tls_context()) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        reason = ""
+        try:                                # {"error": "invalid_grant", ...} from the token
+            error = json.loads(e.read().decode("utf-8")).get("error")      # endpoint,
+            reason = str(error.get("status") or "") if isinstance(error, dict) \
+                else str(error or "")       # {"error": {"status": ...}} from the API
+        except Exception:
+            pass
+        message = DRIVE_ERRORS.get(e.code, "Google Drive: error {}.".format(e.code))
+        if reason:
+            message = "{} ({})".format(message.rstrip("."), reason)
+        raise DriveError(message, e.code, reason)
+    except Exception as e:
+        raise DriveError("Google Drive: no answer ({}).".format(e))
+
+
+class DriveSignIn(object):
+    """One sign-in: the listener on 127.0.0.1 Google sends the browser back
+    to, and the address of Google's page to open. Made on the UI thread,
+    waited for off it."""
+
+    def __init__(self, client_id):
+        import http.server
+        import secrets
+        import urllib.parse
+        owner = self
+        self.code = ""
+        self.error = ""
+        self.cancelled = False
+        self.state = secrets.token_urlsafe(16)
+        self.verifier, challenge = pkce_pair()
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                code = query.get("code", [""])[0]
+                error = query.get("error", [""])[0]
+                state = query.get("state", [owner.state])[0]
+                if not (code or error) or state != owner.state:
+                    self.send_error(404)            # the favicon, or not our sign-in
+                    return
+                owner.code, owner.error = code, error
+                page = SIGNED_IN_PAGE.format(
+                    "Signed in. This tab can be closed, the comments are being fetched "
+                    "in 3ds Max." if code else "Google did not sign you in.").encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(page)))
+                self.end_headers()
+                self.wfile.write(page)
+
+            def log_message(self, *args):           # nothing to the Max listener
+                pass
+
+        self.server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        self.server.timeout = 0.5
+        self.redirect = "http://127.0.0.1:{}".format(self.server.server_address[1])
+        self.url = drive_auth_url(client_id, self.redirect, challenge, self.state)
+
+    def wait(self, seconds=DRIVE_SIGN_IN_SECONDS):
+        """The code Google sent back; raises DriveError when it did not."""
+        deadline = time.time() + seconds
+        try:
+            while not (self.code or self.error or self.cancelled) and time.time() < deadline:
+                self.server.handle_request()
+        finally:
+            self.server.server_close()
+        if self.code:
+            return self.code
+        if self.error:
+            raise DriveError("Google: the sign-in was refused ({}).".format(self.error),
+                             reason=self.error)
+        raise DriveError("Google: the sign-in was not finished in the browser.")
+
+
+def drive_tokens(client, code, verifier, redirect):
+    """Answer of the token endpoint for the code of a sign-in. The secret of a
+    desktop client is not a secret (Google: "public clients"); it is sent when
+    the client file has one."""
+    form = {"client_id": client[0], "code": code, "code_verifier": verifier,
+            "grant_type": "authorization_code", "redirect_uri": redirect}
+    if client[1]:
+        form["client_secret"] = client[1]
+    return drive_call(DRIVE_TOKEN_URL, form)
+
+
+def drive_refresh(client, refresh_token):
+    """Answer of the token endpoint with a new access token."""
+    form = {"client_id": client[0], "grant_type": "refresh_token",
+            "refresh_token": refresh_token}
+    if client[1]:
+        form["client_secret"] = client[1]
+    return drive_call(DRIVE_TOKEN_URL, form)
+
+
+def drive_images(token, file_id):
+    """[(id, name)]: the image a link points to, or the images of the folder
+    it points to."""
+    import urllib.parse
+    info = drive_call("{}/{}?{}".format(DRIVE_API, file_id, urllib.parse.urlencode(
+        {"fields": "id,name,mimeType", "supportsAllDrives": "true"})), token=token)
+    if info.get("mimeType") != DRIVE_FOLDER_TYPE:
+        return [(str(info["id"]), str(info["name"]))]
+    images = []
+    page = ""
+    while True:
+        query = {"q": "'{}' in parents and trashed = false and mimeType contains 'image/'"
+                      .format(file_id),
+                 "fields": "nextPageToken,files(id,name)", "pageSize": "1000",
+                 "supportsAllDrives": "true", "includeItemsFromAllDrives": "true"}
+        if page:
+            query["pageToken"] = page
+        answer = drive_call(DRIVE_API + "?" + urllib.parse.urlencode(query), token=token)
+        images += [(str(f["id"]), str(f["name"])) for f in answer.get("files") or []]
+        page = answer.get("nextPageToken") or ""
+        if not page:
+            return images
+
+
+def drive_comments(token, file_id):
+    """All comments of a file as one comments.list answer."""
+    import urllib.parse
+    comments = []
+    page = ""
+    while True:
+        query = {"fields": "*", "pageSize": "100"}
+        if page:
+            query["pageToken"] = page
+        answer = drive_call("{}/{}/comments?{}".format(
+            DRIVE_API, file_id, urllib.parse.urlencode(query)), token=token)
+        comments += answer.get("comments") or []
+        page = answer.get("nextPageToken") or ""
+        if not page:
+            return {"kind": "drive#commentList", "comments": comments}
+
+
+def drive_folder(link):
+    """Folder on this computer the comments of a link are kept in ('' for no
+    link). Not next to the images: that folder may be shared with the client."""
+    file_id = drive_link_id(link)
+    if not file_id:
+        return ""
+    base = os.environ.get("BACKDROP_DRIVE")         # the tests use their own
+    if not base:
+        base = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"),
+                            "AD Tools", "Backdrop", "drive")
+    return os.path.join(base, file_id)
+
+
+def fetch_drive_comments(token, link):
+    """Save the comments of every image of the link as '<image name> Google
+    Drive Comments.json' in drive_folder(link). Returns (images with
+    comments, comments).
+
+    A file is written only when its content changes: of two comment files of
+    an image the newer one is used, and a fetch must not make an unchanged
+    one newer. An image without comments gets no file, unless it had one."""
+    folder = drive_folder(link)
+    if not os.path.isdir(folder):
+        os.makedirs(folder)
+    with_comments = total = 0
+    for file_id, name in drive_images(token, drive_link_id(link)):
+        text = json.dumps(drive_comments(token, file_id), ensure_ascii=False, indent=1)
+        count = len(parse_drive_comments(text))
+        total += count
+        with_comments += 1 if count else 0
+        path = os.path.join(folder, re.sub(r'[\\/:*?"<>|]', "_", name) + DRIVE_SUFFIX + ".json")
+        old = None
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                old = f.read()
+        except OSError:
+            pass
+        if text != old and (count or old is not None):
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+    return with_comments, total
+
+
+class DriveFetcher(QtCore.QObject):
+    """Signs in (when there is a sign-in to wait for) and fetches off the UI
+    thread; the result comes back through a queued signal."""
+    done = QtCore.Signal(object, str)               # (images, comments) or None, error
+
+    def start(self, client, link, sign_in=None):
+        thread = threading.Thread(target=self._run, args=(client, link, sign_in))
+        thread.daemon = True
+        thread.start()
+
+    def _run(self, client, link, sign_in):
+        try:
+            if sign_in is not None:
+                answer = drive_tokens(client, sign_in.wait(), sign_in.verifier, sign_in.redirect)
+                if answer.get("refresh_token"):
+                    save_drive_refresh(answer["refresh_token"])
+            else:
+                answer = drive_refresh(client, load_drive_refresh())
+            result, error = fetch_drive_comments(answer["access_token"], link), ""
+        except DriveError as e:
+            result, error = None, str(e)
+            if e.reason == "invalid_grant":         # the sign-in expired or was taken back
+                save_drive_refresh("")
+                error = "Google: signed out. Fetch again to sign in."
+        except Exception as e:
+            result, error = None, "Google Drive: {}".format(e)
+        try:
+            self.done.emit(result, error)
+        except RuntimeError:                        # the panel was closed meanwhile
+            pass
 
 
 def fit_frame(width, height):
@@ -1434,6 +1801,12 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
         self._translator = Translator(self)
         self._translator.done.connect(self._translated)
         self._translator.checked.connect(self._key_checked)
+        self._source = "dropbox"            # whose comments are shown, see SOURCES
+        self._drive_link = ""               # Google Drive link of this scene
+        self._drive_sign_in = None          # sign-in being waited for in the browser
+        self._drive_busy = False
+        self._drive = DriveFetcher(self)
+        self._drive.done.connect(self._drive_done)
         # Frames are painted by a Qt overlay; the gw drawing stays as the
         # fallback for a Max where the overlay cannot be created.
         self._use_gw = False
@@ -1755,19 +2128,152 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
             menu.addAction("Look next to the images again").triggered.connect(
                 lambda _checked=False: self.set_notes_folder(""))
         menu.addSeparator()
+        path_line("Google Drive", self._drive_link, "no link")
+        menu.addAction("Google Drive link...").triggered.connect(
+            lambda _checked=False: self.ask_drive_link())
+        if self._drive_link:
+            fetch = menu.addAction("Fetch the comments again")
+            fetch.setEnabled(not self._drive_busy)
+            fetch.triggered.connect(lambda _checked=False: self.fetch_drive())
+        menu.addAction("Google client file (saved)..." if load_drive_client()[0]
+                       else "Google client file...").triggered.connect(
+            lambda _checked=False: self.ask_drive_client())
+        if load_drive_refresh():
+            menu.addAction("Sign out of Google").triggered.connect(
+                lambda _checked=False: self.drive_sign_out())
+        menu.addAction("How to connect Google Drive...").triggered.connect(
+            lambda _checked=False: open_link(GUIDE_URL))
+        menu.addSeparator()
+        for value, text, _kinds in SOURCES:
+            action = menu.addAction("Comments from: {}".format(text))
+            action.setCheckable(True)
+            action.setChecked(value == self._source)
+            action.triggered.connect(lambda _checked=False, v=value: self.set_source(v))
+        menu.addSeparator()
         menu.addAction("Re-read the folders").triggered.connect(
             lambda _checked=False: self.rescan())
         clear = menu.addAction("Clear the folders of this scene")
-        clear.setEnabled(bool(self._folder or self._notes_folder))
+        clear.setEnabled(bool(self._folder or self._notes_folder or self._drive_link))
         clear.triggered.connect(lambda _checked=False: self.clear_folders())
         return menu
 
     def clear_folders(self):
-        """Forget the image and the comments folder of the open scene; the
-        image and the frames leave the viewport with them."""
+        """Forget the image folder, the comments folder and the Google Drive
+        link of the open scene; the image and the frames leave the viewport
+        with them."""
         self._notes_folder = ""
         save_folder(scene_path(), "", "comments")
+        self._drive_link = ""
+        save_folder(scene_path(), "", "drive")
+        self._source = "dropbox"
+        save_folder(scene_path(), "", "source")
         self.set_folder("")
+
+    def set_source(self, source, fetch=True):
+        """Whose comments this scene shows: 'dropbox' the downloaded files,
+        'drive' the comments of Google Drive, never a mix. Going to Drive
+        fetches its comments anew."""
+        self._source = source
+        save_folder(scene_path(), source, "source")
+        self._load_notes(force=True)
+        self._update_counts()
+        if source == "drive" and fetch:
+            if self._drive_link:
+                self.fetch_drive()
+            else:
+                self.set_status("Google Drive: no link yet (the folder button).", warn=True)
+
+    # -- Google Drive ---------------------------------------------------------
+    def ask_drive_link(self):
+        link, ok = QtWidgets.QInputDialog.getText(
+            self, "Google Drive link",
+            "Link to the folder with the images in Google Drive, or to one image.\n"
+            "Empty: remove the link of this scene.",
+            QtWidgets.QLineEdit.Normal, self._drive_link)
+        if ok:
+            self.set_drive_link(link)
+
+    def set_drive_link(self, link):
+        """Google Drive link of this scene; its comments are fetched at once."""
+        link = link.strip()
+        if link and not drive_link_id(link):
+            self.set_status("Not a Google Drive link.", warn=True)
+            return
+        self._drive_link = link
+        save_folder(scene_path(), link, "drive")
+        if link:
+            self.fetch_drive()
+        else:
+            self.set_source("dropbox")      # no link: back to the downloaded files
+
+    def ask_drive_client(self):
+        path, _filter = QtWidgets.QFileDialog.getOpenFileName(
+            self, "OAuth client file from Google Cloud Console (Desktop app)",
+            "", "JSON (*.json)")
+        if path:
+            self.set_drive_client(path)
+
+    def set_drive_client(self, path):
+        """Keep the id and the secret of the user's OAuth client; a sign-in
+        made with another client is forgotten."""
+        try:
+            client = read_drive_client(path)
+        except ValueError as e:
+            self.set_status("Not a Google client file: {}.".format(e), warn=True)
+            return
+        if client != load_drive_client():
+            save_drive_refresh("")
+        _settings().setValue("drive_client_id", client[0])
+        _settings().setValue("drive_client_secret", client[1])
+        self.set_status("Google client saved.")
+        if self._drive_link:
+            self.fetch_drive()
+
+    def drive_sign_out(self):
+        """Forget the sign-in on this computer; the scene goes back to the
+        downloaded files."""
+        save_drive_refresh("")
+        self.set_source("dropbox")
+        self.set_status("Signed out of Google.")
+
+    def fetch_drive(self):
+        """Fetch the comments of the link; the first time through Google's
+        sign-in page in the browser."""
+        if self._drive_busy or not self._drive_link:
+            return
+        client = load_drive_client()
+        if not client[0]:
+            self.set_status("Google Drive: choose the Google client file first "
+                            "(the folder button).", warn=True)
+            return
+        sign_in = None
+        if not load_drive_refresh():
+            try:
+                sign_in = DriveSignIn(client[0])
+            except Exception as e:
+                self.set_status("Google: no sign-in ({}).".format(e), warn=True)
+                return
+            open_link(sign_in.url)
+            self.set_status("Sign in to Google in the browser...")
+        else:
+            self.set_status("Fetching the comments from Google Drive...")
+        self._drive_sign_in = sign_in
+        self._drive_busy = True
+        self._drive.start(client, self._drive_link, sign_in)
+
+    def _drive_done(self, result, error):
+        self._drive_busy = False
+        self._drive_sign_in = None
+        if error:
+            self.set_status(error, warn=True)
+            return
+        images, comments = result
+        self.set_source("drive", fetch=False)       # what was fetched is what is shown
+        self.set_status("Google Drive: {} comments on {} images.".format(comments, images)
+                        if comments else "Google Drive: no comments.")
+
+    def _comment_folders(self):
+        return comment_folders(self._folder, self._notes_folder, drive_folder(self._drive_link))
 
     def open_folder_menu(self):
         menu = self.folder_menu()
@@ -1790,9 +2296,13 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
                 # Save As: the same scene under a new name keeps its folders.
                 save_folder(scene, self._folder)
                 save_folder(scene, self._notes_folder, "comments")
+                save_folder(scene, self._drive_link, "drive")
+                save_folder(scene, self._source, "source")
             else:
+                self._source = load_folder(scene, "source") or "dropbox"
                 # Another scene: its own folders, or none for one never set up.
                 self._notes_folder = load_folder(scene, "comments")
+                self._drive_link = load_folder(scene, "drive")
                 self.set_folder(load_folder(scene), remember=False)
             return
         if self._theme_mode == "auto":
@@ -1895,11 +2405,11 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
 
     def _update_counts(self):
         """Badge on every thumbnail: comments of that image not ticked off."""
-        index = index_comment_files(comment_folders(self._folder, self._notes_folder))
+        index = index_comment_files(self._comment_folders(), self._source)
         for row in range(self.list.count()):
             item = self.list.item(row)
             path = item.data(ROLE_PATH)
-            found = index.get(os.path.basename(path).lower())
+            found = comments_file_of(index, path)
             count = 0
             if found:
                 hidden = self._hidden if (self._notes_file and found == self._notes_file[0]) \
@@ -1912,8 +2422,7 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
         """Read the comments file of the shown image, if it is new or changed."""
         found = None
         if self._shown:
-            path = find_comments_file(
-                self._shown, comment_folders(self._folder, self._notes_folder))
+            path = find_comments_file(self._shown, self._comment_folders(), self._source)
             if path:
                 try:
                     found = (path, os.path.getmtime(path))
@@ -2268,6 +2777,8 @@ class BackdropDockWidget(QtWidgets.QDockWidget):
     def closeEvent(self, event):
         self._poll_timer.stop()
         self._thumb_queue = []
+        if self._drive_sign_in is not None:
+            self._drive_sign_in.cancelled = True    # stop waiting for the browser
         try:
             watch_saves(False)
             draw_comments([])               # leave no callback behind
@@ -2364,6 +2875,29 @@ def load_key():
         return str(_settings().value("deepl_key") or "")
     except Exception:
         return ""
+
+
+def load_drive_client():
+    """(client id, client secret) of the user's Google OAuth client, ('', '')
+    when none was chosen."""
+    try:
+        settings = _settings()
+        return (str(settings.value("drive_client_id") or ""),
+                str(settings.value("drive_client_secret") or ""))
+    except Exception:
+        return "", ""
+
+
+def load_drive_refresh():
+    """Refresh token of the Google sign-in, '' when signed out."""
+    try:
+        return str(_settings().value("drive_refresh") or "")
+    except Exception:
+        return ""
+
+
+def save_drive_refresh(token):
+    _settings().setValue("drive_refresh", token)
 
 
 def load_int(key, default):
