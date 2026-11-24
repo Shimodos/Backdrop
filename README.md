@@ -108,6 +108,10 @@ that field or set it right.
 
 ### With Pulze Scene Manager 2
 
+[Scene Manager](https://www.pulze.io/products/scene-manager) keeps a camera, an animation
+frame, a set of layers and an output file in every setup. The panel reads those setups from
+the scene file, so a scene built with Scene Manager works as it is.
+
 **Nothing to set up**, as long as the setups are named like the images, which is what
 their output files are named by anyway.
 
@@ -118,10 +122,11 @@ Scene Manager writes the render output, and the panel reads the file name from t
 like that image, as far as the setup sets each of them:
 
 - the **camera**;
-- the **frame** (*Time Output → Single*), so animated light and props are where they were
-  for that shot; a setup that renders a range leaves the time slider alone;
-- the **layers** it shows and hides, so two setups on one camera and one frame that differ
-  only in layers are told apart;
+- the **animation frame** (*Time Output → Single*): the time slider goes to it, so
+  animated light, props and decor are where they were for that shot; a setup that renders
+  a range leaves the time slider alone;
+- the **layers**: the ones the setup shows are shown, the ones it hides are hidden, so two
+  setups on one camera and one frame that differ only in layers are told apart;
 - the **render output file** and the **resolution**, so a render started from 3ds Max goes
   to the file of that setup.
 
